@@ -1,0 +1,33 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Build artifacts & caches
+module_cache/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+
+# Logs & temporary files
+*.log
+scratch/
+.tempmediaStorage/
+.user_uploaded/
+*.tmp
+*.temp
+
+# Downloaded iOS packages (large binaries)
+*.ipa
+Downloads/
+OpenRestore_Library/
+
+# User-specific keychain artifacts
+*.crt
+*.key
+*.p12
+*.cnf
