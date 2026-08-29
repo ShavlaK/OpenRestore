@@ -120,6 +120,12 @@ struct ContentView: View {
     @State private var appToDeleteIPA: (name: String, path: String)? = nil
     @State private var showDeleteIPAConfirm: Bool = false
     @State private var showDeviceInfoSheet: Bool = false
+    @State private var showDeviceManagerSheet: Bool = false
+    @State private var selectedDeviceForDetail: DeviceInfo? = nil
+    @State private var editingOwnerName: String = ""
+    @State private var isEditingOwner: Bool = false
+    @State private var showForgetConfirmDialog: Bool = false
+    @State private var deviceToForget: DeviceInfo? = nil
     @State private var showAppleIdSheet: Bool = false
 
     @State private var selectedSavedIPAPaths: Set<String> = []
@@ -230,15 +236,30 @@ struct ContentView: View {
             engine.refreshPurchasedApps()
             engine.scanInstalledAppsFromDevice(catalog: catalogApps)
         }
-        .sheet(isPresented: $isRestoring)           { restoreProgressSheet }
-        .sheet(isPresented: $showManualAdamIdDialog) { manualAdamIdSheet }
-        .sheet(isPresented: $showDeviceInfoSheet)    { deviceInfoSheet }
-        .sheet(isPresented: $showAppleIdSheet)       { appleIdSheet }
+        .sheet(isPresented: $isRestoring)              { restoreProgressSheet }
+        .sheet(isPresented: $showManualAdamIdDialog)    { manualAdamIdSheet }
+        .sheet(isPresented: $showDeviceManagerSheet)    { deviceManagerSheet }
+        .sheet(isPresented: $showDeviceInfoSheet)       { deviceManagerSheet }
+        .sheet(isPresented: $showAppleIdSheet)          { appleIdSheet }
         .alert(isPresented: $showAlert) {
             Alert(title: Text("OpenRestore"), message: Text(alertMessage ?? ""),
                   dismissButton: .default(Text("OK")))
         }
-
+        .alert(isPresented: $showForgetConfirmDialog) {
+            Alert(
+                title: Text("Удалить связь с устройством?"),
+                message: Text("Вы действительно хотите удалить сопряжение с «\(deviceToForget?.name ?? "устройством")»?\n\nСвязь и кэш будут удалены из OpenRestore, а сопряжение с Mac будет сброшено."),
+                primaryButton: .destructive(Text("Удалить связь")) {
+                    if let dev = deviceToForget {
+                        engine.forgetDevice(id: dev.id)
+                        if selectedDeviceForDetail?.id == dev.id {
+                            selectedDeviceForDetail = engine.activeDevice
+                        }
+                    }
+                },
+                secondaryButton: .cancel(Text("Отмена"))
+            )
+        }
         .alert(isPresented: $showDeleteIPAConfirm) {
             Alert(
                 title: Text("Удалить IPA из библиотеки?"),
@@ -320,38 +341,37 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Device Button Card
+                // Device Button Card (iMazing-style Interactive Header)
+                let activeDev = engine.activeDevice
                 Button(action: {
-                    if engine.connectedDevices.first != nil {
-                        showDeviceInfoSheet = true
-                    } else {
-                        engine.refreshDevices()
-                    }
+                    selectedDeviceForDetail = activeDev
+                    showDeviceManagerSheet = true
                 }) {
                     HStack(spacing: 8) {
                         ZStack {
                             Circle()
-                                .fill(engine.connectedDevices.first != nil ? Color.green.opacity(0.15) : Color.secondary.opacity(0.12))
+                                .fill(activeDev != nil ? (activeDev?.connectionType == .usb ? Color.green.opacity(0.15) : (activeDev?.connectionType == .wifi ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12))) : Color.secondary.opacity(0.12))
                                 .frame(width: 28, height: 28)
-                            Image(systemName: engine.connectedDevices.first != nil ? "iphone.gen3" : "cable.connector")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(engine.connectedDevices.first != nil ? .green : .secondary)
+                            Image(systemName: activeDev?.connectionType.icon ?? "cable.connector")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(activeDev != nil ? (activeDev?.connectionType == .usb ? .green : (activeDev?.connectionType == .wifi ? .blue : .secondary)) : .secondary)
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
-                            if let dev = engine.connectedDevices.first {
+                            if let dev = activeDev {
                                 Text(dev.marketingName.isEmpty ? dev.name : dev.marketingName)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(.primary)
                                     .lineLimit(1)
-                                Text(dev.iosVersion + (dev.battery.isEmpty ? "" : " • \(dev.battery)"))
+                                Text("\(dev.ownerName) • \(dev.iosVersion)")
                                     .font(.system(size: 9))
                                     .foregroundColor(.secondary)
+                                    .lineLimit(1)
                             } else {
                                 Text("iPhone не подключен")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(.primary)
-                                Text("Подключите кабель к Mac")
+                                Text("Подключите кабель или Wi-Fi")
                                     .font(.system(size: 9))
                                     .foregroundColor(.secondary)
                             }
@@ -359,9 +379,19 @@ struct ContentView: View {
 
                         Spacer()
 
-                        Circle()
-                            .fill(engine.connectedDevices.first != nil ? Color.green : Color.secondary.opacity(0.4))
-                            .frame(width: 6, height: 6)
+                        if let dev = activeDev {
+                            Text(dev.isOnline ? dev.connectionType.rawValue : "Офлайн")
+                                .font(.system(size: 8, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(dev.isOnline ? (dev.connectionType == .usb ? Color.green.opacity(0.15) : Color.blue.opacity(0.15)) : Color.secondary.opacity(0.15))
+                                .foregroundColor(dev.isOnline ? (dev.connectionType == .usb ? .green : .blue) : .secondary)
+                                .clipShape(Capsule())
+                        } else {
+                            Circle()
+                                .fill(Color.secondary.opacity(0.4))
+                                .frame(width: 6, height: 6)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
@@ -372,6 +402,7 @@ struct ContentView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .help("Нажмите для открытия Менеджера устройств")
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
@@ -1989,17 +2020,42 @@ struct ContentView: View {
         .frame(width: 540)
     }
 
-    // MARK: - Device Info Sheet
-    private var deviceInfoSheet: some View {
+    // MARK: - Device Manager Sheet (iMazing Style)
+    private var deviceManagerSheet: some View {
         VStack(spacing: 0) {
+            // Header
             HStack {
-                Text("Характеристики устройства")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "iphone.and.arrow.forward")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.blue)
+                        Text("Менеджер устройств")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+                    Text("Управление подключенными iPhone/iPad, связью по USB и Wi-Fi, историей и сопряжением")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
                 Spacer()
-                Button("Закрыть") { showDeviceInfoSheet = false }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
+
+                Button(action: {
+                    engine.refreshDevices()
+                }) {
+                    Label("Обновить", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .roundedCapsuleButton()
+                .controlSize(.small)
+
+                Button("Закрыть") {
+                    showDeviceManagerSheet = false
+                    showDeviceInfoSheet = false
+                }
+                .buttonStyle(.borderedProminent)
+                .roundedCapsuleButton()
+                .controlSize(.small)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -2007,23 +2063,309 @@ struct ContentView: View {
 
             Divider()
 
-            if let dev = engine.connectedDevices.first {
-                List {
-                    deviceInfoRow(label: "Модель", value: "\(dev.marketingName) (\(dev.modelIdentifier))")
-                    deviceInfoRow(label: "Имя устройства", value: dev.name)
-                    deviceInfoRow(label: "Версия iOS", value: dev.iosVersion)
-                    if !dev.battery.isEmpty { deviceInfoRow(label: "Уровень заряда", value: dev.battery) }
-                    if !dev.diskCapacity.isEmpty { deviceInfoRow(label: "Память", value: dev.diskCapacity) }
-                    if !dev.serialNumber.isEmpty { deviceInfoRow(label: "Серийный номер", value: dev.serialNumber) }
-                    if !dev.wifiAddress.isEmpty { deviceInfoRow(label: "Wi-Fi MAC-адрес", value: dev.wifiAddress) }
-                    deviceInfoRow(label: "UDID", value: dev.udid)
+            // Main Split Body: Left List, Right Inspector
+            HStack(spacing: 0) {
+                // Left Column: Devices List
+                VStack(alignment: .leading, spacing: 12) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            // Section 1: Connected Devices (Online)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("ПОДКЛЮЧЕНЫ СЕЙЧАС (\(engine.connectedDevices.count))")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 4)
+
+                                if engine.connectedDevices.isEmpty {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "cable.connector")
+                                            .foregroundColor(.secondary)
+                                        Text("Нет подключенных устройств")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 10))
+                                } else {
+                                    ForEach(engine.connectedDevices) { dev in
+                                        deviceListCard(dev: dev, isOnline: true)
+                                    }
+                                }
+                            }
+
+                            // Section 2: Remembered / Previously Connected Devices (History)
+                            let offlineDevices = engine.knownDevices.filter { k in !engine.connectedDevices.contains(where: { $0.id == k.id }) }
+                            if !offlineDevices.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text("РАНЕЕ ПОДКЛЮЧАЛИСЬ (\(offlineDevices.count))")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 4)
+                                    .padding(.top, 6)
+
+                                    ForEach(offlineDevices) { dev in
+                                        deviceListCard(dev: dev, isOnline: false)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(12)
+                    }
                 }
-                .listStyle(.inset)
-            } else {
-                emptyStateView(icon: "cable.connector", title: "Устройство не подключено", subtitle: "Подключите iPhone через USB")
+                .frame(width: 270)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+
+                Divider()
+
+                // Right Column: Detailed Device Inspector
+                let currentDev = selectedDeviceForDetail ?? engine.activeDevice ?? engine.connectedDevices.first ?? engine.knownDevices.first
+
+                if let dev = currentDev {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // Device Hero Banner
+                            HStack(spacing: 16) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: dev.isOnline ? [Color.blue, Color.cyan] : [Color.gray, Color.secondary],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 60, height: 60)
+                                        .shadow(color: dev.isOnline ? Color.blue.opacity(0.3) : Color.clear, radius: 6, x: 0, y: 2)
+
+                                    Image(systemName: "iphone.gen3")
+                                        .font(.system(size: 30))
+                                        .foregroundColor(.white)
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 8) {
+                                        Text(dev.marketingName.isEmpty ? dev.name : dev.marketingName)
+                                            .font(.system(size: 15, weight: .bold, design: .rounded))
+
+                                        // Connection Type Badge
+                                        HStack(spacing: 4) {
+                                            Image(systemName: dev.connectionType.icon)
+                                                .font(.system(size: 10, weight: .bold))
+                                            Text(dev.isOnline ? dev.connectionType.rawValue : "Не в сети")
+                                                .font(.system(size: 10, weight: .bold))
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(dev.isOnline ? (dev.connectionType == .usb ? Color.green.opacity(0.15) : Color.blue.opacity(0.15)) : Color.secondary.opacity(0.15))
+                                        .foregroundColor(dev.isOnline ? (dev.connectionType == .usb ? .green : .blue) : .secondary)
+                                        .clipShape(Capsule())
+
+                                        if dev.id == engine.activeDevice?.id {
+                                            Text("Активно")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.blue)
+                                                .foregroundColor(.white)
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+
+                                    HStack(spacing: 6) {
+                                        Text("Владелец: **\(dev.ownerName)**")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                        Text("•").foregroundColor(.secondary)
+                                        Text(dev.iosVersion)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                    }
+
+                                    if !dev.isOnline {
+                                        Text("Последнее подключение: \(formatDate(dev.lastSeen))")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+                                Spacer()
+                            }
+                            .padding(14)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+
+                            // Specs Card
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Характеристики и параметры")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+
+                                VStack(spacing: 8) {
+                                    deviceInfoRow(label: "Владелец", value: dev.ownerName)
+                                    deviceInfoRow(label: "Имя устройства", value: dev.name)
+                                    deviceInfoRow(label: "Модель", value: "\(dev.marketingName) (\(dev.modelIdentifier))")
+                                    deviceInfoRow(label: "Версия системы", value: dev.iosVersion)
+                                    deviceInfoRow(label: "Тип связи", value: dev.connectionType == .usb ? "USB-кабель (Прямой канал)" : (dev.connectionType == .wifi ? "Wi-Fi сеть (Беспроводная синхронизация)" : "Отключено"))
+                                    if !dev.battery.isEmpty { deviceInfoRow(label: "Уровень заряда", value: dev.battery) }
+                                    if !dev.diskCapacity.isEmpty { deviceInfoRow(label: "Память накопителя", value: dev.diskCapacity) }
+                                    if !dev.serialNumber.isEmpty { deviceInfoRow(label: "Серийный номер", value: dev.serialNumber) }
+                                    if !dev.wifiAddress.isEmpty { deviceInfoRow(label: "Wi-Fi MAC-адрес", value: dev.wifiAddress) }
+                                    deviceInfoRow(label: "UDID", value: dev.udid)
+                                }
+                            }
+                            .padding(14)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+
+                            // Actions Card
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Управление устройством")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+
+                                HStack(spacing: 10) {
+                                    if dev.id != engine.activeDevice?.id {
+                                        Button(action: {
+                                            engine.selectDevice(id: dev.id)
+                                            selectedDeviceForDetail = dev
+                                        }) {
+                                            Label("Сделать активным", systemImage: "checkmark.circle.fill")
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .roundedCapsuleButton()
+                                        .controlSize(.regular)
+                                    }
+
+                                    if dev.isOnline {
+                                        Button(action: {
+                                            showDeviceManagerSheet = false
+                                            showDeviceInfoSheet = false
+                                            storedSidebarTab = SidebarItem.device.rawValue
+                                            engine.scanInstalledAppsFromDevice(catalog: catalogApps)
+                                        }) {
+                                            Label("Сканировать приложения", systemImage: "arrow.clockwise")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .roundedCapsuleButton()
+                                        .controlSize(.regular)
+                                    }
+
+                                    Spacer()
+
+                                    Button(action: {
+                                        deviceToForget = dev
+                                        showForgetConfirmDialog = true
+                                    }) {
+                                        Label("Удалить связь", systemImage: "trash")
+                                            .foregroundColor(.red)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .roundedCapsuleButton()
+                                    .controlSize(.regular)
+                                    .help("Удалить сопряжение и историю устройства")
+                                }
+                            }
+                            .padding(14)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+                        .padding(16)
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        Spacer()
+                        Image(systemName: "cable.connector")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary.opacity(0.6))
+                        Text("Устройства не найдены")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                        Text("Подключите iPhone через USB-кабель или по Wi-Fi для управления и установки приложений.")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 320)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
-        .frame(width: 460, height: 360)
+        .frame(width: 760, height: 540)
+    }
+
+    private func deviceListCard(dev: DeviceInfo, isOnline: Bool) -> some View {
+        let isSelected = (selectedDeviceForDetail?.id ?? engine.activeDevice?.id) == dev.id
+        return Button(action: {
+            selectedDeviceForDetail = dev
+            if isOnline {
+                engine.selectDevice(id: dev.id)
+            }
+        }) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(isOnline ? (dev.connectionType == .usb ? Color.green.opacity(0.15) : Color.blue.opacity(0.15)) : Color.secondary.opacity(0.12))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: isOnline ? dev.connectionType.icon : "icloud.slash")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(isOnline ? (dev.connectionType == .usb ? .green : .blue) : .secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(dev.name)
+                        .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        Text(dev.ownerName)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.blue)
+                        Text("•").foregroundColor(.secondary).font(.system(size: 9))
+                        Text(dev.iosVersion)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? Color.blue.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.dateStyle = .short
+        df.timeStyle = .short
+        return df.string(from: date)
     }
 
     private func deviceInfoRow(label: String, value: String) -> some View {
@@ -2031,7 +2373,7 @@ struct ContentView: View {
             Text(label)
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
-                .frame(width: 130, alignment: .leading)
+                .frame(width: 140, alignment: .leading)
             Text(value)
                 .font(.system(size: 12, design: .monospaced))
                 .textSelection(.enabled)

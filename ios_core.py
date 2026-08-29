@@ -22,73 +22,103 @@ def get_devices():
             return []
     return []
 
-def get_device_info():
-    """Return full device info including battery, storage, OS from lockdown."""
+def get_all_devices_info():
+    """Return full device info for all connected devices (USB and Wi-Fi/Network)."""
     from pymobiledevice3.lockdown import create_using_usbmux
 
-    async def _fetch():
+    async def _fetch_all():
         devices = get_devices()
-        usb_dev = next((d for d in devices if d.get("ConnectionType") == "USB"), None)
-        if not usb_dev:
-            usb_dev = devices[0] if devices else None
-        if not usb_dev:
-            return {}
+        if not devices:
+            return []
 
-        udid = usb_dev.get("UniqueDeviceID") or usb_dev.get("Identifier", "")
+        results = []
+        for dev in devices:
+            udid = dev.get("UniqueDeviceID") or dev.get("Identifier", "")
+            raw_conn = dev.get("ConnectionType", "USB")
+            conn_type = "Wi-Fi" if raw_conn in ["Network", "WiFi", "Wireless"] else "USB"
 
-        result = {
-            "DeviceName": usb_dev.get("DeviceName", ""),
-            "ProductType": usb_dev.get("ProductType", ""),
-            "ProductVersion": usb_dev.get("ProductVersion", ""),
-            "UniqueDeviceID": udid,
-            "ConnectionType": usb_dev.get("ConnectionType", ""),
-            "BatteryCurrentCapacity": None,
-            "TotalDiskCapacity": None,
-            "AvailableDiskCapacity": None,
-            "SerialNumber": None,
-            "WiFiAddress": None,
-        }
-
-        try:
-            ld = await create_using_usbmux(serial=udid if udid else None)
-
-            # Battery
-            try:
-                bat = await ld.get_value(domain="com.apple.mobile.battery", key="BatteryCurrentCapacity")
-                result["BatteryCurrentCapacity"] = int(bat) if bat is not None else None
-            except Exception:
-                pass
-
-            # Disk
-            try:
-                disk = await ld.get_value(domain="com.apple.disk_usage")
-                if isinstance(disk, dict):
-                    total = disk.get("TotalDiskCapacity") or disk.get("TotalDataCapacity")
-                    avail = disk.get("TotalDataAvailable") or disk.get("TotalSystemAvailable")
-                    result["TotalDiskCapacity"] = int(total) if total else None
-                    result["AvailableDiskCapacity"] = int(avail) if avail else None
-            except Exception:
-                pass
-
-            # Serial & Wifi
-            try:
-                info = await ld.get_value()
-                if isinstance(info, dict):
-                    result["SerialNumber"] = info.get("SerialNumber")
-                    result["WiFiAddress"] = info.get("WiFiAddress")
-            except Exception:
-                pass
+            item = {
+                "DeviceName": dev.get("DeviceName", "") or "iPhone",
+                "ProductType": dev.get("ProductType", ""),
+                "ProductVersion": dev.get("ProductVersion", ""),
+                "UniqueDeviceID": udid,
+                "ConnectionType": conn_type,
+                "BatteryCurrentCapacity": None,
+                "TotalDiskCapacity": None,
+                "AvailableDiskCapacity": None,
+                "SerialNumber": None,
+                "WiFiAddress": None,
+            }
 
             try:
-                await ld.close()
-            except:
-                pass
-        except Exception as e:
-            result["lockdown_error"] = str(e)
+                ld = await create_using_usbmux(serial=udid if udid else None)
+                # Battery
+                try:
+                    bat = await ld.get_value(domain="com.apple.mobile.battery", key="BatteryCurrentCapacity")
+                    item["BatteryCurrentCapacity"] = int(bat) if bat is not None else None
+                except Exception:
+                    pass
 
-        return result
+                # Disk
+                try:
+                    disk = await ld.get_value(domain="com.apple.disk_usage")
+                    if isinstance(disk, dict):
+                        total = disk.get("TotalDiskCapacity") or disk.get("TotalDataCapacity")
+                        avail = disk.get("TotalDataAvailable") or disk.get("TotalSystemAvailable")
+                        item["TotalDiskCapacity"] = int(total) if total else None
+                        item["AvailableDiskCapacity"] = int(avail) if avail else None
+                except Exception:
+                    pass
 
-    return asyncio.run(_fetch())
+                # Serial & Wifi
+                try:
+                    info = await ld.get_value()
+                    if isinstance(info, dict):
+                        if not item["DeviceName"] or item["DeviceName"] == "iPhone":
+                            item["DeviceName"] = info.get("DeviceName", item["DeviceName"])
+                        item["SerialNumber"] = info.get("SerialNumber")
+                        item["WiFiAddress"] = info.get("WiFiAddress")
+                        if not item["ProductVersion"]:
+                            item["ProductVersion"] = info.get("ProductVersion", "")
+                        if not item["ProductType"]:
+                            item["ProductType"] = info.get("ProductType", "")
+                except Exception:
+                    pass
+
+                try:
+                    await ld.close()
+                except:
+                    pass
+            except Exception as e:
+                item["lockdown_error"] = str(e)
+
+            results.append(item)
+        return results
+
+    try:
+        return asyncio.run(_fetch_all())
+    except Exception:
+        return []
+
+def get_device_info():
+    """Return device info for the primary device (backwards compatibility)."""
+    all_devs = get_all_devices_info()
+    if all_devs:
+        # Prefer USB connected device if available
+        usb_dev = next((d for d in all_devs if d.get("ConnectionType") == "USB"), all_devs[0])
+        return usb_dev
+    return {}
+
+def unpair_device(udid=None):
+    """Unpair and remove pairing record for device."""
+    try:
+        cmd = [os.path.join(VENV_BIN, "pymobiledevice3"), "lockdown", "unpair"]
+        if udid:
+            cmd += ["--udid", udid]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        return {"success": res.returncode == 0, "message": res.stdout or res.stderr}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def get_installed_apps():
     import urllib.request, plistlib
@@ -377,6 +407,11 @@ if __name__ == "__main__":
         print(json.dumps(get_devices(), ensure_ascii=False))
     elif action == "devinfo":
         print(json.dumps(get_device_info(), ensure_ascii=False))
+    elif action == "devinfo_all":
+        print(json.dumps(get_all_devices_info(), ensure_ascii=False))
+    elif action == "unpair":
+        udid = sys.argv[2] if len(sys.argv) > 2 else None
+        print(json.dumps(unpair_device(udid), ensure_ascii=False))
     elif action == "apps":
         print(json.dumps(get_installed_apps(), ensure_ascii=False))
     elif action == "install":

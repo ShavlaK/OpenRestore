@@ -43,6 +43,8 @@ cp "$DIST_DIR/OpenRestore-v${VERSION}-macOS.dmg" "$DIST_DIR/OpenRestore-v${VERSI
 echo "📦 Создание Universal ZIP-архива..."
 ZIP_NAME="OpenRestore-v${VERSION}-macOS.zip"
 ditto -c -k --sequesterRsrc --keepParent OpenRestore.app "$DIST_DIR/OpenRestore.app.zip"
+rm -rf "$RELEASE_DIR/OpenRestore.app"
+cp -R OpenRestore.app "$RELEASE_DIR/"
 (
     cd "$RELEASE_DIR"
     zip -r -q "$DIST_DIR/$ZIP_NAME" OpenRestore.app OpenRestore.command README.md INSTRUCTIONS.md CONFIGURATOR_GUIDE.md CHANGELOG.md LICENSE catalog.json

@@ -77,12 +77,8 @@ if [ -f "AppIcon.icns" ]; then
   cp AppIcon.icns OpenRestore.app/Contents/Resources/AppIcon.icns
 fi
 
+xattr -cr OpenRestore.app
 codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - OpenRestore.app
-
-# Применяем иконку к бандлу приложения в Finder
-if [ -f "AppIcon.icns" ]; then
-  swift -e 'import AppKit; if let img = NSImage(contentsOfFile: "AppIcon.icns") { NSWorkspace.shared.setIcon(img, forFile: "OpenRestore.app", options: []) }'
-fi
 
 touch OpenRestore.app
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -trusted OpenRestore.app 2>/dev/null || true

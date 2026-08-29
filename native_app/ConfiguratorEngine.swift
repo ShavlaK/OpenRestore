@@ -2,18 +2,68 @@ import Foundation
 import AppKit
 import SQLite3
 
-public struct DeviceInfo: Identifiable, Hashable, Sendable {
-    public var id: String { udid.isEmpty ? ecid : udid }
-    public let name: String
-    public let modelIdentifier: String
-    public let marketingName: String
-    public let iosVersion: String
-    public let diskCapacity: String
-    public let battery: String
-    public let udid: String
-    public let ecid: String
-    public let serialNumber: String
-    public let wifiAddress: String
+public enum DeviceConnectionType: String, Codable, Sendable, CaseIterable {
+    case usb = "USB"
+    case wifi = "Wi-Fi"
+    case offline = "Отключено"
+
+    public var icon: String {
+        switch self {
+        case .usb: return "cable.connector.horizontal"
+        case .wifi: return "wifi"
+        case .offline: return "icloud.slash"
+        }
+    }
+}
+
+public struct DeviceInfo: Identifiable, Hashable, Sendable, Codable {
+    public var id: String { udid.isEmpty ? (serialNumber.isEmpty ? name : serialNumber) : udid }
+    public var name: String
+    public var ownerName: String
+    public var modelIdentifier: String
+    public var marketingName: String
+    public var iosVersion: String
+    public var diskCapacity: String
+    public var battery: String
+    public var udid: String
+    public var ecid: String
+    public var serialNumber: String
+    public var wifiAddress: String
+    public var connectionType: DeviceConnectionType
+    public var isOnline: Bool
+    public var lastSeen: Date
+
+    public init(
+        name: String,
+        ownerName: String = "",
+        modelIdentifier: String,
+        marketingName: String,
+        iosVersion: String,
+        diskCapacity: String = "",
+        battery: String = "",
+        udid: String = "",
+        ecid: String = "",
+        serialNumber: String = "",
+        wifiAddress: String = "",
+        connectionType: DeviceConnectionType = .usb,
+        isOnline: Bool = true,
+        lastSeen: Date = Date()
+    ) {
+        self.name = name
+        self.ownerName = ownerName.isEmpty ? ConfiguratorEngine.extractOwnerName(from: name) : ownerName
+        self.modelIdentifier = modelIdentifier
+        self.marketingName = marketingName
+        self.iosVersion = iosVersion
+        self.diskCapacity = diskCapacity
+        self.battery = battery
+        self.udid = udid
+        self.ecid = ecid
+        self.serialNumber = serialNumber
+        self.wifiAddress = wifiAddress
+        self.connectionType = connectionType
+        self.isOnline = isOnline
+        self.lastSeen = lastSeen
+    }
 }
 
 public struct AppItem: Identifiable, Codable, Hashable {
@@ -227,9 +277,28 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         return false
     }
 
+    public static let knownDevicesPath: String = {
+        return "\(libraryDir)/known_devices.json"
+    }()
+
     private let coreDataEpochDiff: Double = 978307200.0 // Seconds between 1970 and 2001
 
     @Published public var connectedDevices: [DeviceInfo] = []
+    @Published public var knownDevices: [DeviceInfo] = []
+    @Published public var selectedDeviceId: String = ""
+
+    public var activeDevice: DeviceInfo? {
+        if !selectedDeviceId.isEmpty {
+            if let d = connectedDevices.first(where: { $0.id == selectedDeviceId }) {
+                return d
+            }
+            if let d = knownDevices.first(where: { $0.id == selectedDeviceId }) {
+                return d
+            }
+        }
+        return connectedDevices.first ?? knownDevices.first
+    }
+
     @Published public var purchasedApps: [PurchasedApp] = []
     @Published public var oldDeviceApps: [DeviceInstalledApp] = []
     @Published public var currentAccountDsid: String = ""
@@ -382,13 +451,143 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         checkAllPermissions()
     }
 
+    public static func extractOwnerName(from deviceName: String, appleIdName: String = "", email: String = "") -> String {
+        let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let apostropheRange = trimmed.range(of: "’s ", options: .caseInsensitive) ?? trimmed.range(of: "'s ", options: .caseInsensitive) {
+            let namePart = String(trimmed[..<apostropheRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if !namePart.isEmpty { return namePart }
+        }
+        if let start = trimmed.range(of: "("), let end = trimmed.range(of: ")", range: start.upperBound..<trimmed.endIndex) {
+            let inside = String(trimmed[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if !inside.isEmpty && !inside.lowercased().contains("gb") && !inside.lowercased().contains("гб") {
+                return inside
+            }
+        }
+        if let otRange = trimmed.range(of: " от ", options: .caseInsensitive) {
+            let namePart = String(trimmed[otRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if !namePart.isEmpty { return namePart }
+        }
+        if let otRange = trimmed.range(of: " пользователя ", options: .caseInsensitive) {
+            let namePart = String(trimmed[otRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if !namePart.isEmpty { return namePart }
+        }
+        if !appleIdName.isEmpty { return appleIdName }
+        if !email.isEmpty {
+            let prefix = email.components(separatedBy: "@").first ?? ""
+            if !prefix.isEmpty { return prefix }
+        }
+        return "Пользователь"
+    }
+
+    public func loadKnownDevices() -> [DeviceInfo] {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: Self.knownDevicesPath)),
+              let list = try? JSONDecoder().decode([DeviceInfo].self, from: data) else {
+            return []
+        }
+        return list
+    }
+
+    public func saveKnownDevices() {
+        try? FileManager.default.createDirectory(atPath: Self.libraryDir, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(self.knownDevices) {
+            try? data.write(to: URL(fileURLWithPath: Self.knownDevicesPath))
+        }
+    }
+
+    public func forgetDevice(id: String) {
+        let devToForget = knownDevices.first(where: { $0.id == id }) ?? connectedDevices.first(where: { $0.id == id })
+        let udid = devToForget?.udid ?? id
+
+        knownDevices.removeAll(where: { $0.id == id || (!udid.isEmpty && $0.udid == udid) })
+        connectedDevices.removeAll(where: { $0.id == id || (!udid.isEmpty && $0.udid == udid) })
+
+        if selectedDeviceId == id || selectedDeviceId == udid {
+            selectedDeviceId = connectedDevices.first?.id ?? knownDevices.first?.id ?? ""
+        }
+
+        saveKnownDevices()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let coreScript = "\(Self.workDir)/ios_core.py"
+            if FileManager.default.isExecutableFile(atPath: coreScript) {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: coreScript)
+                proc.arguments = ["unpair", udid]
+                try? proc.run()
+                proc.waitUntilExit()
+            }
+        }
+
+        appendLog("Связь с устройством «\(devToForget?.name ?? id)» удалена. Сопряжение сброшено.", level: "DEVICE")
+    }
+
+    public func selectDevice(id: String) {
+        self.selectedDeviceId = id
+        appendLog("Выбрано активное устройство: \(activeDevice?.name ?? id)", level: "DEVICE")
+    }
+
+    public func updateOwnerName(id: String, newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        if let idx = knownDevices.firstIndex(where: { $0.id == id }) {
+            knownDevices[idx].ownerName = trimmed
+        }
+        if let idx = connectedDevices.firstIndex(where: { $0.id == id }) {
+            connectedDevices[idx].ownerName = trimmed
+        }
+        saveKnownDevices()
+    }
+
     public func refreshDevices() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let devs = self.getConnectedDevicesDetails()
+            let onlineDevs = self.getConnectedDevicesDetails()
+
             DispatchQueue.main.async {
-                if self.connectedDevices != devs {
-                    self.connectedDevices = devs
+                self.connectedDevices = onlineDevs
+
+                var updatedKnown = self.knownDevices
+                if updatedKnown.isEmpty {
+                    updatedKnown = self.loadKnownDevices()
+                }
+
+                for online in onlineDevs {
+                    if let idx = updatedKnown.firstIndex(where: { $0.id == online.id || (!online.udid.isEmpty && $0.udid == online.udid) }) {
+                        var existing = updatedKnown[idx]
+                        existing.name = online.name
+                        if existing.ownerName.isEmpty || existing.ownerName == "Пользователь" {
+                            existing.ownerName = online.ownerName
+                        }
+                        existing.modelIdentifier = online.modelIdentifier
+                        existing.marketingName = online.marketingName
+                        existing.iosVersion = online.iosVersion
+                        if !online.diskCapacity.isEmpty { existing.diskCapacity = online.diskCapacity }
+                        if !online.battery.isEmpty { existing.battery = online.battery }
+                        if !online.serialNumber.isEmpty { existing.serialNumber = online.serialNumber }
+                        if !online.wifiAddress.isEmpty { existing.wifiAddress = online.wifiAddress }
+                        existing.connectionType = online.connectionType
+                        existing.isOnline = true
+                        existing.lastSeen = Date()
+                        updatedKnown[idx] = existing
+                    } else {
+                        updatedKnown.insert(online, at: 0)
+                    }
+                }
+
+                for i in 0..<updatedKnown.count {
+                    let k = updatedKnown[i]
+                    if !onlineDevs.contains(where: { $0.id == k.id || (!k.udid.isEmpty && $0.udid == k.udid) }) {
+                        updatedKnown[i].isOnline = false
+                        updatedKnown[i].connectionType = .offline
+                    }
+                }
+
+                self.knownDevices = updatedKnown
+                self.saveKnownDevices()
+
+                if self.selectedDeviceId.isEmpty || !updatedKnown.contains(where: { $0.id == self.selectedDeviceId }) {
+                    self.selectedDeviceId = onlineDevs.first?.id ?? updatedKnown.first?.id ?? ""
                 }
             }
         }
@@ -610,7 +809,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: coreScript)
-        proc.arguments = ["devinfo"]
+        proc.arguments = ["devinfo_all"]
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()
@@ -625,51 +824,69 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         guard proc.terminationStatus == 0 else { return [] }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              !dict.isEmpty,
-              let productType = dict["ProductType"] as? String, !productType.isEmpty
-        else { return [] }
+        var rawList: [[String: Any]] = []
 
-        let name = (dict["DeviceName"] as? String) ?? "iPhone"
-        let productVersion = (dict["ProductVersion"] as? String) ?? ""
-        let udid = (dict["UniqueDeviceID"] as? String) ?? ""
-        let modelNum = (dict["RegulatoryModelNumber"] as? String) ?? (dict["ModelNumber"] as? String) ?? ""
-        let givenMarketing = (dict["MarketingName"] as? String) ?? ""
-        let marketingName = !givenMarketing.isEmpty ? givenMarketing : Self.mapMarketingName(productType, modelNumber: modelNum)
+        if let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            rawList = arr
+        } else if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any], !dict.isEmpty {
+            rawList = [dict]
+        }
 
-        // Format disk capacity
-        var diskStr = ""
-        if let totalBytes = dict["TotalDiskCapacity"] as? Int {
-            let gb = Int(round(Double(totalBytes) / 1_000_000_000.0))
-            var freeStr = ""
-            if let freeBytes = dict["AvailableDiskCapacity"] as? Int {
-                let freeGb = Double(freeBytes) / 1_073_741_824.0
-                freeStr = String(format: " (свободно %.0f ГБ)", freeGb)
+        var result: [DeviceInfo] = []
+
+        for dict in rawList {
+            guard let productType = dict["ProductType"] as? String, !productType.isEmpty else { continue }
+
+            let name = (dict["DeviceName"] as? String) ?? "iPhone"
+            let productVersion = (dict["ProductVersion"] as? String) ?? ""
+            let udid = (dict["UniqueDeviceID"] as? String) ?? ""
+            let modelNum = (dict["RegulatoryModelNumber"] as? String) ?? (dict["ModelNumber"] as? String) ?? ""
+            let givenMarketing = (dict["MarketingName"] as? String) ?? ""
+            let marketingName = !givenMarketing.isEmpty ? givenMarketing : Self.mapMarketingName(productType, modelNumber: modelNum)
+            let connStr = (dict["ConnectionType"] as? String) ?? "USB"
+            let connType: DeviceConnectionType = (connStr.lowercased().contains("wi") || connStr.lowercased().contains("net")) ? .wifi : .usb
+
+            // Format disk capacity
+            var diskStr = ""
+            if let totalBytes = dict["TotalDiskCapacity"] as? Int {
+                let gb = Int(round(Double(totalBytes) / 1_000_000_000.0))
+                var freeStr = ""
+                if let freeBytes = dict["AvailableDiskCapacity"] as? Int {
+                    let freeGb = Double(freeBytes) / 1_073_741_824.0
+                    freeStr = String(format: " (свободно %.0f ГБ)", freeGb)
+                }
+                diskStr = "\(gb) ГБ\(freeStr)"
             }
-            diskStr = "\(gb) ГБ\(freeStr)"
+
+            // Format battery
+            var battStr = ""
+            if let bat = dict["BatteryCurrentCapacity"] as? Int {
+                battStr = "\(bat)%"
+            }
+
+            let serial = (dict["SerialNumber"] as? String) ?? ""
+            let wifi = (dict["WiFiAddress"] as? String) ?? ""
+
+            let dev = DeviceInfo(
+                name: name,
+                ownerName: Self.extractOwnerName(from: name),
+                modelIdentifier: productType,
+                marketingName: marketingName,
+                iosVersion: productVersion.isEmpty ? "iOS" : (productVersion.starts(with: "iOS") ? productVersion : "iOS \(productVersion)"),
+                diskCapacity: diskStr,
+                battery: battStr,
+                udid: udid,
+                ecid: "",
+                serialNumber: serial,
+                wifiAddress: wifi,
+                connectionType: connType,
+                isOnline: true,
+                lastSeen: Date()
+            )
+            result.append(dev)
         }
 
-        // Format battery
-        var battStr = ""
-        if let bat = dict["BatteryCurrentCapacity"] as? Int {
-            battStr = "\(bat)%"
-        }
-
-        let serial = (dict["SerialNumber"] as? String) ?? ""
-        let wifi = (dict["WiFiAddress"] as? String) ?? ""
-
-        return [DeviceInfo(
-            name: name,
-            modelIdentifier: productType,
-            marketingName: marketingName,
-            iosVersion: "iOS \(productVersion)",
-            diskCapacity: diskStr,
-            battery: battStr,
-            udid: udid,
-            ecid: "",
-            serialNumber: serial,
-            wifiAddress: wifi
-        )]
+        return result
     }
 
     public func scanInstalledAppsFromDevice(ecid: String? = nil, catalog: [AppItem] = []) {
