@@ -861,9 +861,9 @@ struct ContentView: View {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
                         }) {
-                            Image(systemName: "arrow.clockwise")
+                            Label("Скачать", systemImage: "arrow.clockwise")
                                 .font(.system(size: 11, weight: .medium))
-                                .frame(width: 22, height: 26)
+                                .frame(width: 76, height: 26)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -872,13 +872,9 @@ struct ContentView: View {
                         Button(action: {
                             startInstallFlow(ipaPath: saved.path, name: app.displayName)
                         }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 10))
-                                Text("Установить")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            .frame(width: 94, height: 26)
+                            Label("Установить", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 136, height: 26)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
@@ -887,9 +883,9 @@ struct ContentView: View {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
                         }) {
-                            Image(systemName: "arrow.down.circle")
+                            Label("Скачать", systemImage: "arrow.down.circle")
                                 .font(.system(size: 11, weight: .medium))
-                                .frame(width: 22, height: 26)
+                                .frame(width: 76, height: 26)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -898,13 +894,9 @@ struct ContentView: View {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: true)
                         }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.down.to.line.compact")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("Установить")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            .frame(width: 94, height: 26)
+                            Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .frame(width: 136, height: 26)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.blue)
@@ -921,7 +913,7 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .foregroundColor(.orange)
-                    .frame(width: 124, height: 26)
+                    .frame(width: 218, height: 26)
                 }
 
                 Button(action: {
@@ -941,7 +933,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("Удалить IPA из библиотеки (без удаления с iPhone)")
             }
-            .frame(width: 156, alignment: .trailing)
+            .frame(width: 250, alignment: .trailing)
         }
         .padding(.vertical, 4)
     }
@@ -1161,9 +1153,9 @@ struct ContentView: View {
                     Button(action: {
                         startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
                     }) {
-                        Image(systemName: "arrow.clockwise")
+                        Label("Скачать", systemImage: "arrow.clockwise")
                             .font(.system(size: 11, weight: .medium))
-                            .frame(width: 22, height: 26)
+                            .frame(width: 76, height: 26)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1172,13 +1164,9 @@ struct ContentView: View {
                     Button(action: {
                         startInstallFlow(ipaPath: saved.path, name: item.name)
                     }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 10))
-                            Text("Установить")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        .frame(width: 94, height: 26)
+                        Label("Установить", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 136, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
@@ -1187,9 +1175,9 @@ struct ContentView: View {
                     Button(action: {
                         startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
                     }) {
-                        Image(systemName: "arrow.down.circle")
+                        Label("Скачать", systemImage: "arrow.down.circle")
                             .font(.system(size: 11, weight: .medium))
-                            .frame(width: 22, height: 26)
+                            .frame(width: 76, height: 26)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1198,13 +1186,9 @@ struct ContentView: View {
                     Button(action: {
                         startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: true)
                     }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.down.to.line.compact")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("Установить")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        .frame(width: 94, height: 26)
+                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 136, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
@@ -1212,7 +1196,7 @@ struct ContentView: View {
                     .help("Скачать и установить на подключенный iPhone")
                 }
             }
-            .frame(width: 136, alignment: .trailing)
+            .frame(width: 224, alignment: .trailing)
         }
         .padding(10)
         .frame(height: 84)
@@ -1311,9 +1295,9 @@ struct ContentView: View {
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
                     }) {
-                        Image(systemName: "arrow.clockwise")
+                        Label("Скачать", systemImage: "arrow.clockwise")
                             .font(.system(size: 11, weight: .medium))
-                            .frame(width: 22, height: 26)
+                            .frame(width: 76, height: 26)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1322,13 +1306,9 @@ struct ContentView: View {
                     Button(action: {
                         startInstallFlow(ipaPath: saved.path, name: item.name)
                     }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 10))
-                            Text("Установить")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        .frame(width: 94, height: 26)
+                        Label("Установить", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 136, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
@@ -1337,9 +1317,9 @@ struct ContentView: View {
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
                     }) {
-                        Image(systemName: "arrow.down.circle")
+                        Label("Скачать", systemImage: "arrow.down.circle")
                             .font(.system(size: 11, weight: .medium))
-                            .frame(width: 22, height: 26)
+                            .frame(width: 76, height: 26)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1348,13 +1328,9 @@ struct ContentView: View {
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: true)
                     }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.down.to.line.compact")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("Установить")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        .frame(width: 94, height: 26)
+                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 136, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
@@ -1362,7 +1338,7 @@ struct ContentView: View {
                     .help("Скачать и установить на iPhone")
                 }
             }
-            .frame(width: 136, alignment: .trailing)
+            .frame(width: 224, alignment: .trailing)
         }
         .padding(.vertical, 4)
     }
