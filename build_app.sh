@@ -28,6 +28,8 @@ cat << 'PLIST' > OpenRestore.app/Contents/Info.plist
     <string>APPL</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
     <string>1.5.0</string>
     <key>CFBundleVersion</key>
@@ -76,5 +78,13 @@ if [ -f "AppIcon.icns" ]; then
 fi
 
 codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - OpenRestore.app
+
+# Применяем иконку к бандлу приложения в Finder
+if [ -f "AppIcon.icns" ]; then
+  swift -e 'import AppKit; if let img = NSImage(contentsOfFile: "AppIcon.icns") { NSWorkspace.shared.setIcon(img, forFile: "OpenRestore.app", options: []) }'
+fi
+
+touch OpenRestore.app
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -trusted OpenRestore.app 2>/dev/null || true
 
 echo "Готово! OpenRestore.app успешно собрано (Universal 2: arm64 + x86_64) и подписано."
