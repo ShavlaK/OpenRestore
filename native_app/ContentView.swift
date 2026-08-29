@@ -13,10 +13,46 @@ struct SavedIPA: Identifiable, Hashable {
     let adamId: String
 }
 
+// MARK: - App Logo View (Blue gradient rounded squircle with white lightning bolt)
+struct AppLogoView: View {
+    var size: CGFloat = 30
+    var cornerRadius: CGFloat = 8
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.blue, Color.cyan],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: size, height: size)
+                .shadow(color: Color.blue.opacity(0.35), radius: size * 0.15, x: 0, y: 1)
+
+            Image(systemName: "bolt.horizontal.fill")
+                .font(.system(size: size * 0.46, weight: .bold))
+                .foregroundColor(.white)
+        }
+    }
+}
+
+// MARK: - Universal Rounded Capsule Button Modifier
+extension View {
+    @ViewBuilder
+    func roundedCapsuleButton() -> some View {
+        if #available(macOS 14.0, *) {
+            self.buttonBorderShape(.capsule)
+        } else {
+            self.buttonBorderShape(.roundedRectangle)
+        }
+    }
+}
+
 // MARK: - Sidebar Items
 enum SidebarItem: String, CaseIterable, Identifiable {
     case device    = "Со старого iPhone"
-    case catalog   = "Каталог удалённых"
     case purchases = "Покупки Apple ID"
     case customId  = "Произвольный ID"
     case library   = "Библиотека IPA"
@@ -27,7 +63,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .device:    return "iphone.and.arrow.forward"
-        case .catalog:   return "square.grid.2x2.fill"
         case .purchases: return "bag.fill"
         case .customId:  return "number.circle.fill"
         case .library:   return "archivebox.fill"
@@ -71,8 +106,6 @@ struct ContentView: View {
     @AppStorage("preferDirectMode")        private var preferDirectMode: Bool = true
     @AppStorage("autoClickConfigurator")   private var autoClickConfigurator: Bool = true
     @AppStorage("autoCheckUpdates")        private var autoCheckUpdates: Bool = true
-    @AppStorage("catalogSortMode")         private var catalogSortMode: String = "popularity"
-    @AppStorage("selectedCatalogCategory") private var selectedCatalogCategory: String = "Все"
 
     var selectedSidebar: SidebarItem {
         SidebarItem(rawValue: storedSidebarTab) ?? .device
@@ -137,80 +170,6 @@ struct ContentView: View {
             $0.displayName.lowercased().contains(q) || $0.filename.lowercased().contains(q) ||
             $0.version.lowercased().contains(q) || $0.adamId.contains(q)
         }
-    }
-
-    var smartCatalogFilters: [String] {
-        let base = ["Все", "🔥 Популярные", "📲 На iPhone", "💾 В библиотеке"]
-        let customCats = Set(catalogApps.map { $0.category }).filter { !$0.isEmpty }.sorted()
-        return base + customCats
-    }
-
-    var sortModeTitle: String {
-        switch catalogSortMode {
-        case "name": return "По названию"
-        case "saved": return "Сначала на Mac"
-        default: return "По популярности"
-        }
-    }
-
-    var filteredCatalogApps: [AppItem] {
-        var list = catalogApps
-
-        // Category & Smart Filter
-        switch selectedCatalogCategory {
-        case "Все":
-            break
-        case "🔥 Популярные":
-            list = list.filter {
-                engine.getInstallCount(adamId: $0.adam_id) > 0 ||
-                ConfiguratorEngine.isDelistedFromAppStore(adamId: $0.adam_id, bundleId: $0.bundle_id)
-            }
-        case "📲 На iPhone":
-            let devBundleIds = Set(engine.oldDeviceApps.map { $0.bundleId.lowercased() })
-            let devAdamIds = Set(engine.oldDeviceApps.compactMap { $0.adamId })
-            list = list.filter {
-                devAdamIds.contains($0.adam_id) || devBundleIds.contains($0.bundle_id.lowercased())
-            }
-        case "💾 В библиотеке":
-            list = list.filter {
-                isSavedInLibrary(adamId: $0.adam_id, name: $0.name, bundleId: $0.bundle_id) != nil
-            }
-        default:
-            list = list.filter { $0.category == selectedCatalogCategory }
-        }
-
-        // Search query
-        if !searchQuery.isEmpty {
-            let q = searchQuery.lowercased()
-            list = list.filter {
-                $0.name.lowercased().contains(q) ||
-                String($0.adam_id).contains(q) ||
-                $0.category.lowercased().contains(q) ||
-                $0.bundle_id.lowercased().contains(q)
-            }
-        }
-
-        // Sorting
-        switch catalogSortMode {
-        case "name":
-            list.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        case "saved":
-            list.sort { a, b in
-                let aSaved = isSavedInLibrary(adamId: a.adam_id, name: a.name, bundleId: a.bundle_id) != nil
-                let bSaved = isSavedInLibrary(adamId: b.adam_id, name: b.name, bundleId: b.bundle_id) != nil
-                if aSaved != bSaved { return aSaved && !bSaved }
-                return a.name.localizedStandardCompare(b.name) == .orderedAscending
-            }
-        default: // popularity
-            list.sort { a, b in
-                let aCount = engine.getInstallCount(adamId: a.adam_id)
-                let bCount = engine.getInstallCount(adamId: b.adam_id)
-                if aCount != bCount { return aCount > bCount }
-                return a.name.localizedStandardCompare(b.name) == .orderedAscending
-            }
-        }
-
-        return list
     }
 
     var filteredOldDeviceApps: [DeviceInstalledApp] {
@@ -302,16 +261,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // App Title & Badge
             HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 28, height: 28)
-                        .shadow(color: Color.blue.opacity(0.3), radius: 4, x: 0, y: 1)
-
-                    Image(systemName: "bolt.horizontal.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                }
+                AppLogoView(size: 30, cornerRadius: 8)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("OpenRestore")
@@ -362,9 +312,9 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
                 }
@@ -401,7 +351,7 @@ struct ContentView: View {
                                 Text("iPhone не подключен")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(.primary)
-                                Text("Подключите по USB")
+                                Text("Подключите кабель к Mac")
                                     .font(.system(size: 9))
                                     .foregroundColor(.secondary)
                             }
@@ -409,17 +359,15 @@ struct ContentView: View {
 
                         Spacer()
 
-                        if engine.connectedDevices.first != nil {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 6, height: 6)
-                        }
+                        Circle()
+                            .fill(engine.connectedDevices.first != nil ? Color.green : Color.secondary.opacity(0.4))
+                            .frame(width: 6, height: 6)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
                 }
@@ -447,7 +395,6 @@ struct ContentView: View {
                             .padding(.bottom, 2)
 
                         sidebarNavButton(item: .device)
-                        sidebarNavButton(item: .catalog)
                         sidebarNavButton(item: .purchases)
                     }
 
@@ -545,7 +492,7 @@ struct ContentView: View {
             .background(
                 Group {
                     if isSelected {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(Color.blue)
                             .shadow(color: Color.blue.opacity(0.25), radius: 3, x: 0, y: 1)
                     } else {
@@ -561,7 +508,6 @@ struct ContentView: View {
     private func sidebarCount(_ item: SidebarItem) -> Int? {
         switch item {
         case .device:    return engine.oldDeviceApps.count
-        case .catalog:   return filteredCatalogApps.count
         case .purchases: return engine.purchasedApps.count
         case .library:   return savedIPAs.count
         case .customId, .settings: return nil
@@ -578,7 +524,6 @@ struct ContentView: View {
 
             switch selectedSidebar {
             case .device:    oldDeviceAppsView
-            case .catalog:   catalogView
             case .purchases: purchasedAppsView
             case .customId:  customIdView
             case .library:   savedIPAsView
@@ -609,6 +554,7 @@ struct ContentView: View {
                 engine.openAccessibilitySettings()
             }
             .buttonStyle(.borderedProminent)
+            .roundedCapsuleButton()
             .tint(.orange)
             .controlSize(.small)
 
@@ -667,12 +613,11 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                    .cornerRadius(8)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: Capsule())
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        Capsule()
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
 
@@ -690,6 +635,7 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
                     .disabled(engine.isScanningApps)
                 }
@@ -707,6 +653,7 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
 
                     if !selectedAdamIds.isEmpty {
@@ -718,6 +665,7 @@ struct ContentView: View {
                             Label("Скачать (\(selectedAdamIds.count))", systemImage: "arrow.down.circle")
                         }
                         .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
                         .controlSize(.small)
                         .disabled(isBatchDownloading)
 
@@ -725,6 +673,8 @@ struct ContentView: View {
                             Label("Установить (\(selectedAdamIds.count))", systemImage: "arrow.down.to.line.circle.fill")
                         }
                         .buttonStyle(.borderedProminent)
+                        .roundedCapsuleButton()
+                        .tint(.blue)
                         .controlSize(.small)
                         .disabled(isBatchDownloading)
                     }
@@ -807,7 +757,7 @@ struct ContentView: View {
                             .padding(.vertical, 1)
                             .background(Color.primary.opacity(0.05))
                             .foregroundColor(.secondary)
-                            .cornerRadius(4)
+                            .clipShape(Capsule())
                     }
                 }
 
@@ -833,6 +783,10 @@ struct ContentView: View {
                                 .font(.system(size: 9, weight: .bold))
                         }
                         .foregroundColor(.green)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.green.opacity(0.12))
+                        .clipShape(Capsule())
                     }
                 }
             }
@@ -851,6 +805,7 @@ struct ContentView: View {
                                 .frame(width: 76, height: 26)
                         }
                         .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
                         .controlSize(.small)
                         .help("Скачать IPA заново")
 
@@ -862,6 +817,7 @@ struct ContentView: View {
                                 .frame(width: 136, height: 26)
                         }
                         .buttonStyle(.borderedProminent)
+                        .roundedCapsuleButton()
                         .tint(.green)
                         .controlSize(.small)
                     } else {
@@ -873,6 +829,7 @@ struct ContentView: View {
                                 .frame(width: 76, height: 26)
                         }
                         .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
                         .controlSize(.small)
                         .help("Скачать IPA в Библиотеку")
 
@@ -884,6 +841,7 @@ struct ContentView: View {
                                 .frame(width: 136, height: 26)
                         }
                         .buttonStyle(.borderedProminent)
+                        .roundedCapsuleButton()
                         .tint(.blue)
                         .controlSize(.small)
                         .help("Скачать и установить на iPhone")
@@ -896,6 +854,7 @@ struct ContentView: View {
                         showManualAdamIdDialog = true
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
                     .foregroundColor(.orange)
                     .frame(width: 218, height: 26)
@@ -923,255 +882,6 @@ struct ContentView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - 1. Catalog View
-    private var catalogView: some View {
-        VStack(spacing: 0) {
-            glassToolbar {
-                HStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                        TextField("Поиск удаленных приложений (Сбер, Тинькофф, ВТБ, 2ГИС...)", text: $searchQuery)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                        if !searchQuery.isEmpty {
-                            Button(action: { searchQuery = "" }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 12))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
-
-                    // Sort menu
-                    Menu {
-                        Button(action: { catalogSortMode = "popularity" }) {
-                            HStack {
-                                Text("По популярности и частоте")
-                                if catalogSortMode == "popularity" { Image(systemName: "checkmark") }
-                            }
-                        }
-                        Button(action: { catalogSortMode = "saved" }) {
-                            HStack {
-                                Text("Сначала сохранённые на Mac")
-                                if catalogSortMode == "saved" { Image(systemName: "checkmark") }
-                            }
-                        }
-                        Button(action: { catalogSortMode = "name" }) {
-                            HStack {
-                                Text("По названию (А-Я)")
-                                if catalogSortMode == "name" { Image(systemName: "checkmark") }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.arrow.down")
-                                .font(.system(size: 11))
-                            Text(sortModeTitle)
-                                .font(.system(size: 11))
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Color.primary.opacity(0.06))
-                        .cornerRadius(6)
-                    }
-                    .menuStyle(.borderlessButton)
-                }
-            }
-
-            // Smart Filter Chips Bar
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(smartCatalogFilters, id: \.self) { cat in
-                        let isSel = selectedCatalogCategory == cat
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.15)) { selectedCatalogCategory = cat }
-                        }) {
-                            Text(cat)
-                                .font(.system(size: 11, weight: isSel ? .bold : .medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(isSel ? Color.blue : Color.primary.opacity(0.06))
-                                .foregroundColor(isSel ? .white : .primary)
-                                .cornerRadius(6)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-            }
-            .background(.ultraThinMaterial.opacity(0.5))
-            .overlay(
-                Rectangle()
-                    .fill(Color.primary.opacity(0.05))
-                    .frame(height: 1),
-                alignment: .bottom
-            )
-
-            // Grid
-            ScrollView {
-                if filteredCatalogApps.isEmpty {
-                    emptyStateView(
-                        icon: "square.grid.2x2",
-                        title: "Приложения не найдены",
-                        subtitle: "Попробуйте изменить категорию или поисковый запрос"
-                    )
-                    .padding(.top, 40)
-                } else {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        ForEach(filteredCatalogApps) { item in
-                            catalogAppCard(item: item)
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-        }
-    }
-
-    private func catalogAppCard(item: AppItem) -> some View {
-        let savedIPA = isSavedInLibrary(adamId: item.adam_id, name: item.name, bundleId: item.bundle_id)
-        let installCount = engine.getInstallCount(adamId: item.adam_id)
-        let isOnDevice = engine.oldDeviceApps.contains { $0.adamId == item.adam_id || $0.bundleId.lowercased() == item.bundle_id.lowercased() }
-
-        return HStack(spacing: 10) {
-            appIconView(url: nil, name: item.name)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Text(item.name)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-
-                    if savedIPA != nil {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.green)
-                            .help("Сохранено в локальной библиотеке на Mac")
-                    }
-                }
-
-                // Badges row
-                HStack(spacing: 4) {
-                    if isOnDevice {
-                        HStack(spacing: 2) {
-                            Image(systemName: "iphone")
-                                .font(.system(size: 7))
-                            Text("На iPhone")
-                                .font(.system(size: 8, weight: .semibold))
-                        }
-                        .foregroundColor(.teal)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.teal.opacity(0.12))
-                        .cornerRadius(4)
-                    }
-
-                    if installCount > 0 {
-                        HStack(spacing: 2) {
-                            Text("🔥 \(installCount)")
-                                .font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundColor(.purple)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.purple.opacity(0.12))
-                        .cornerRadius(4)
-                    }
-                }
-
-                Text(item.description)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-
-                HStack(spacing: 4) {
-                    Text("ID: \(String(item.adam_id))")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(.blue)
-
-                    Text("•").foregroundColor(.secondary)
-
-                    Text(item.category)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            // Symmetrical, fixed-width action buttons container
-            HStack(spacing: 6) {
-                if let saved = savedIPA {
-                    Button(action: {
-                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
-                    }) {
-                        Label("Скачать", systemImage: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 76, height: 26)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Скачать IPA заново из App Store")
-
-                    Button(action: {
-                        startInstallFlow(ipaPath: saved.path, name: item.name)
-                    }) {
-                        Label("Установить", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11, weight: .bold))
-                            .frame(width: 136, height: 26)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                    .controlSize(.small)
-                } else {
-                    Button(action: {
-                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
-                    }) {
-                        Label("Скачать", systemImage: "arrow.down.circle")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 76, height: 26)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Скачать IPA в Библиотеку на Mac")
-
-                    Button(action: {
-                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: true)
-                    }) {
-                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .frame(width: 136, height: 26)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-                    .controlSize(.small)
-                    .help("Скачать и установить на подключенный iPhone")
-                }
-            }
-            .frame(width: 224, alignment: .trailing)
-        }
-        .padding(10)
-        .frame(height: 84)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-    }
-
     // MARK: - 2. Purchased Apps View
     private var purchasedAppsView: some View {
         VStack(spacing: 0) {
@@ -1184,13 +894,20 @@ struct ContentView: View {
                         TextField("Поиск среди \(engine.purchasedApps.count) покупок в Apple ID...", text: $searchQuery)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
+                        if !searchQuery.isEmpty {
+                            Button(action: { searchQuery = "" }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                    .cornerRadius(8)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: Capsule())
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        Capsule()
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
 
@@ -1201,6 +918,7 @@ struct ContentView: View {
                         Label("Синхронизировать", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
                 }
             }
@@ -1265,6 +983,7 @@ struct ContentView: View {
                             .frame(width: 76, height: 26)
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
                     .help("Скачать IPA заново")
 
@@ -1276,6 +995,7 @@ struct ContentView: View {
                             .frame(width: 136, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
+                    .roundedCapsuleButton()
                     .tint(.green)
                     .controlSize(.small)
                 } else {
@@ -1287,6 +1007,7 @@ struct ContentView: View {
                             .frame(width: 76, height: 26)
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
                     .help("Скачать IPA в Библиотеку")
 
@@ -1298,6 +1019,7 @@ struct ContentView: View {
                             .frame(width: 136, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
+                    .roundedCapsuleButton()
                     .tint(.blue)
                     .controlSize(.small)
                     .help("Скачать и установить на iPhone")
@@ -1314,18 +1036,11 @@ struct ContentView: View {
             Spacer()
 
             VStack(spacing: 20) {
-                ZStack {
-                    Circle()
-                        .fill(Color.blue.opacity(0.12))
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "number.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(.blue)
-                }
+                AppLogoView(size: 56, cornerRadius: 16)
 
                 VStack(spacing: 4) {
                     Text("Восстановление по Adam ID")
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
                     Text("Введите числовой идентификатор любого приложения из App Store для прямой загрузки официального IPA.")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
@@ -1333,16 +1048,29 @@ struct ContentView: View {
                         .frame(maxWidth: 380)
                 }
 
-                VStack(spacing: 12) {
-                    TextField("Например: 570510529", text: $customAdamId)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 14, design: .monospaced))
-                        .frame(width: 320)
-                        .onSubmit {
-                            if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
-                                startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
+                VStack(spacing: 14) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "number")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 13, weight: .semibold))
+
+                        TextField("Например: 570510529", text: $customAdamId)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 14, design: .monospaced))
+                            .onSubmit {
+                                if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
+                                    startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
+                                }
                             }
-                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.8), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                    .frame(width: 320)
 
                     HStack(spacing: 10) {
                         Button(action: {
@@ -1353,6 +1081,7 @@ struct ContentView: View {
                             Label("Скачать IPA", systemImage: "arrow.down.circle")
                         }
                         .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
                         .controlSize(.regular)
                         .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
 
@@ -1364,15 +1093,17 @@ struct ContentView: View {
                             Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
                         }
                         .buttonStyle(.borderedProminent)
+                        .roundedCapsuleButton()
+                        .tint(.blue)
                         .controlSize(.regular)
                         .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
                     }
                 }
             }
             .padding(32)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 3)
@@ -1395,13 +1126,20 @@ struct ContentView: View {
                         TextField("Поиск среди \(savedIPAs.count) сохраненных IPA на Mac...", text: $savedIPASearchQuery)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
+                        if !savedIPASearchQuery.isEmpty {
+                            Button(action: { savedIPASearchQuery = "" }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                    .cornerRadius(8)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: Capsule())
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        Capsule()
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
 
@@ -1409,6 +1147,7 @@ struct ContentView: View {
                         Label("Импорт IPA", systemImage: "plus.circle")
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
 
                     Button(action: {
@@ -1417,6 +1156,7 @@ struct ContentView: View {
                         Image(systemName: "folder")
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
                     .help("Открыть в Finder")
                 }
@@ -1432,6 +1172,7 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
 
                     if !selectedSavedIPAPaths.isEmpty {
@@ -1443,6 +1184,7 @@ struct ContentView: View {
                             Label("Установить (\(selectedSavedIPAPaths.count))", systemImage: "arrow.down.to.line.circle.fill")
                         }
                         .buttonStyle(.borderedProminent)
+                        .roundedCapsuleButton()
                         .tint(.green)
                         .controlSize(.small)
                         .disabled(isBatchInstallingIPAs)
@@ -1456,6 +1198,7 @@ struct ContentView: View {
                                 .foregroundColor(.red)
                         }
                         .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
                         .controlSize(.small)
                     }
 
@@ -1485,7 +1228,7 @@ struct ContentView: View {
                 emptyStateView(
                     icon: "archivebox",
                     title: "Библиотека IPA пуста",
-                    subtitle: "Скачивайте приложения из каталога или нажмите «Импорт IPA», чтобы добавить свои файлы."
+                    subtitle: "Скачивайте приложения из покупок Apple ID или нажмите «Импорт IPA», чтобы добавить свои файлы."
                 )
             } else {
                 List(filteredSavedIPAs) { item in
@@ -1512,7 +1255,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.green.opacity(0.15))
                     .frame(width: 32, height: 32)
                 Image(systemName: "checkmark.seal.fill")
@@ -1534,7 +1277,7 @@ struct ContentView: View {
                             .padding(.vertical, 1)
                             .background(Color.primary.opacity(0.05))
                             .foregroundColor(.secondary)
-                            .cornerRadius(4)
+                            .clipShape(Capsule())
                     }
                 }
 
@@ -1565,6 +1308,7 @@ struct ContentView: View {
                 Label("Установить", systemImage: "iphone.and.arrow.forward")
             }
             .buttonStyle(.borderedProminent)
+            .roundedCapsuleButton()
             .tint(.green)
             .controlSize(.small)
 
@@ -1589,7 +1333,7 @@ struct ContentView: View {
                 // Header
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Настройки")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
                     Text("Управление оформлением, папками и алгоритмами загрузки")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -1628,12 +1372,11 @@ struct ContentView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
+                                .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
+                                .background(Color(NSColor.controlBackgroundColor), in: Capsule())
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
+                                    Capsule()
                                         .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                                 )
 
@@ -1649,6 +1392,7 @@ struct ContentView: View {
                                 }
                             }
                             .buttonStyle(.bordered)
+                            .roundedCapsuleButton()
                             .controlSize(.small)
 
                             if !customLibraryPath.isEmpty {
@@ -1657,6 +1401,7 @@ struct ContentView: View {
                                     loadSavedIPAs()
                                 }
                                 .buttonStyle(.bordered)
+                                .roundedCapsuleButton()
                                 .controlSize(.small)
                             }
                         }
@@ -1668,6 +1413,7 @@ struct ContentView: View {
                                 Label("Показать в Finder", systemImage: "folder")
                             }
                             .buttonStyle(.bordered)
+                            .roundedCapsuleButton()
                             .controlSize(.small)
 
                             Text("По умолчанию: ~/Downloads/OpenRestore")
@@ -1717,12 +1463,11 @@ struct ContentView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
+                                .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
+                                .background(Color(NSColor.controlBackgroundColor), in: Capsule())
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
+                                    Capsule()
                                         .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                                 )
 
@@ -1740,6 +1485,7 @@ struct ContentView: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
+                            .roundedCapsuleButton()
                             .tint(copiedLogsToast ? .green : .blue)
                             .controlSize(.small)
 
@@ -1749,6 +1495,7 @@ struct ContentView: View {
                                 Label("Очистить", systemImage: "trash")
                             }
                             .buttonStyle(.bordered)
+                            .roundedCapsuleButton()
                             .controlSize(.small)
 
                             Button(action: {
@@ -1757,6 +1504,7 @@ struct ContentView: View {
                                 Label("Открыть файл", systemImage: "arrow.up.forward.square")
                             }
                             .buttonStyle(.bordered)
+                            .roundedCapsuleButton()
                             .controlSize(.small)
                         }
 
@@ -1788,13 +1536,13 @@ struct ContentView: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
+                                .padding(10)
                             }
                             .frame(height: 140)
                             .background(Color(NSColor.textBackgroundColor))
-                            .cornerRadius(8)
+                            .cornerRadius(10)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
+                                RoundedRectangle(cornerRadius: 10)
                                     .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
                             )
                         }
@@ -1808,7 +1556,7 @@ struct ContentView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Текущая версия: OpenRestore v1.5.0")
                                     .font(.system(size: 12, weight: .semibold))
-                                Text("Сборка для macOS (Apple Silicon & Intel)")
+                                Text("Сборка Universal 2 для macOS (Apple Silicon & Intel)")
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary)
                             }
@@ -1832,6 +1580,7 @@ struct ContentView: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
+                            .roundedCapsuleButton()
                             .tint(.teal)
                             .controlSize(.small)
                             .disabled(engine.isCheckingUpdates)
@@ -1864,6 +1613,7 @@ struct ContentView: View {
                                                 NSWorkspace.shared.open(url)
                                             }
                                             .buttonStyle(.borderedProminent)
+                                            .roundedCapsuleButton()
                                             .tint(.green)
                                             .controlSize(.small)
                                         }
@@ -1877,7 +1627,7 @@ struct ContentView: View {
                                     }
                                 }
                                 .padding(10)
-                                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                             } else {
                                 HStack(spacing: 6) {
                                     Image(systemName: "checkmark.seal.fill")
@@ -1887,7 +1637,7 @@ struct ContentView: View {
                                         .foregroundColor(.secondary)
                                 }
                                 .padding(8)
-                                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 6))
+                                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
                             }
                         } else if let err = engine.updateCheckError {
                             HStack(spacing: 6) {
@@ -1898,22 +1648,20 @@ struct ContentView: View {
                                     .foregroundColor(.secondary)
                             }
                             .padding(8)
-                            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
 
                 // Section 6: About
                 settingsCard(title: "О программе OpenRestore", icon: "info.circle.fill", iconColor: .secondary) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "bolt.horizontal.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(.blue)
+                    HStack(spacing: 14) {
+                        AppLogoView(size: 44, cornerRadius: 12)
 
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text("OpenRestore 2.0 Pro")
                                 .font(.system(size: 13, weight: .bold))
-                            Text("Нативный клиент восстановления удаленных iOS-приложений с официальной FairPlay DRM лицензией Apple ID.")
+                            Text("Нативный клиент восстановления iOS-приложений с официальной FairPlay DRM лицензией Apple ID.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
@@ -1939,9 +1687,9 @@ struct ContentView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
     }
@@ -1963,9 +1711,9 @@ struct ContentView: View {
             }
         }
         .frame(width: 36, height: 36)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
     }
@@ -1986,7 +1734,7 @@ struct ContentView: View {
                 .font(.system(size: 36))
                 .foregroundColor(.secondary.opacity(0.6))
             Text(title)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundColor(.primary)
             Text(subtitle)
                 .font(.system(size: 11))
@@ -2003,10 +1751,11 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Учётная запись Apple ID")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                 Spacer()
                 Button("Закрыть") { showAppleIdSheet = false }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
             }
             .padding(.horizontal, 20)
@@ -2042,7 +1791,7 @@ struct ContentView: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Color.green.opacity(0.12))
-                                .cornerRadius(5)
+                                .clipShape(Capsule())
                             }
                         }
 
@@ -2061,9 +1810,9 @@ struct ContentView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                 )
 
@@ -2085,6 +1834,7 @@ struct ContentView: View {
                         Label("Сменить Apple ID / Войти", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.borderedProminent)
+                    .roundedCapsuleButton()
                     .tint(.blue)
 
                     Button(action: {
@@ -2094,6 +1844,7 @@ struct ContentView: View {
                         Label("Синхронизировать", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                 }
 
                 // Step-by-step manual guide
@@ -2127,11 +1878,11 @@ struct ContentView: View {
                     }
                     .padding(.leading, 4)
                 }
-                .padding(12)
+                .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.primary.opacity(0.07), lineWidth: 1)
                 )
             }
@@ -2146,7 +1897,7 @@ struct ContentView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(restoringAdamId == 0 ? "Установка на iPhone" : (shouldInstallAfterDownload ? "Загрузка и установка" : "Загрузка IPA"))
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                     Text(restoringAppName)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -2159,6 +1910,7 @@ struct ContentView: View {
                     isRestoring = false
                 }
                 .buttonStyle(.bordered)
+                .roundedCapsuleButton()
                 .controlSize(.small)
             }
             .padding(.horizontal, 20)
@@ -2177,10 +1929,10 @@ struct ContentView: View {
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(Color.green.opacity(0.08))
-                .cornerRadius(6)
+                .clipShape(Capsule())
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -2209,9 +1961,9 @@ struct ContentView: View {
                 }
                 .frame(height: 140)
                 .background(Color(NSColor.textBackgroundColor))
-                .cornerRadius(8)
+                .cornerRadius(10)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 10)
                         .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
                 )
 
@@ -2227,6 +1979,7 @@ struct ContentView: View {
                             loadSavedIPAs()
                         }
                         .buttonStyle(.borderedProminent)
+                        .roundedCapsuleButton()
                         .tint(.green)
                     }
                 }
@@ -2241,10 +1994,11 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Характеристики устройства")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                 Spacer()
                 Button("Закрыть") { showDeviceInfoSheet = false }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
             }
             .padding(.horizontal, 20)
@@ -2290,10 +2044,11 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Указать Adam ID")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                 Spacer()
                 Button("Закрыть") { showManualAdamIdDialog = false }
                     .buttonStyle(.bordered)
+                    .roundedCapsuleButton()
                     .controlSize(.small)
             }
             .padding(.horizontal, 20)
@@ -2310,8 +2065,15 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
 
                 TextField("Числовой Adam ID (например: 570510529)", text: $manualEnteredId)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .font(.system(size: 13, design: .monospaced))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(NSColor.controlBackgroundColor), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
                     .onSubmit {
                         if let aid = Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) {
                             engine.saveUserMapping(bundleId: manualBundleId, adamId: aid)
@@ -2328,6 +2090,7 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .roundedCapsuleButton()
                     .disabled(Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) == nil)
                 }
             }

@@ -26,12 +26,14 @@ cat << 'PLIST' > OpenRestore.app/Contents/Info.plist
     <string>OpenRestore</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.5</string>
+    <string>1.5.0</string>
     <key>CFBundleVersion</key>
-    <string>1.5</string>
+    <string>1.5.0</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
@@ -54,15 +56,14 @@ cat << 'ENT' > openrestore.entitlements
 ENT
 
 echo "Компиляция нативного Universal 2 приложения (Apple Silicon arm64 + Intel x86_64)..."
-mkdir -p build_tmp OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources module_cache
+rm -rf module_cache build_tmp
+mkdir -p build_tmp OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources
 
 swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
-  -module-cache-path ./module_cache \
   native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
   -lsqlite3 -o build_tmp/OpenRestore_arm64
 
 swiftc -O -parse-as-library -target x86_64-apple-macos13.0 \
-  -module-cache-path ./module_cache \
   native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
   -lsqlite3 -o build_tmp/OpenRestore_x86_64
 
@@ -70,6 +71,9 @@ lipo -create build_tmp/OpenRestore_arm64 build_tmp/OpenRestore_x86_64 -output Op
 rm -rf build_tmp
 
 cp catalog.json OpenRestore.app/Contents/Resources/catalog.json
+if [ -f "AppIcon.icns" ]; then
+  cp AppIcon.icns OpenRestore.app/Contents/Resources/AppIcon.icns
+fi
 
 codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - OpenRestore.app
 
