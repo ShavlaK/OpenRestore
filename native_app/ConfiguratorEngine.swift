@@ -57,6 +57,26 @@ public struct IPAResult {
     public let hasFairPlay: Bool
 }
 
+public struct AppUpdateInfo: Identifiable, Equatable {
+    public let id: String
+    public let version: String
+    public let title: String
+    public let releaseNotes: String
+    public let downloadUrl: String?
+    public let publishedAt: String
+    public let isNewer: Bool
+
+    public init(id: String, version: String, title: String, releaseNotes: String, downloadUrl: String?, publishedAt: String, isNewer: Bool) {
+        self.id = id
+        self.version = version
+        self.title = title
+        self.releaseNotes = releaseNotes
+        self.downloadUrl = downloadUrl
+        self.publishedAt = publishedAt
+        self.isNewer = isNewer
+    }
+}
+
 // MARK: - Centralized Log Manager for Diagnostics & Debugging
 public class LogManager: ObservableObject {
     public static let shared = LogManager()
@@ -170,6 +190,43 @@ public class ConfiguratorEngine: ObservableObject {
         return "\(libraryDir)/adam_mappings.json"
     }()
 
+    // Known Russian/Delisted/Sanctioned apps removed from App Store
+    public static let delistedAdamIds: Set<Int64> = [
+        492224193,  // СберБанк (СБОЛ)
+        468663497,  // Т-Банк (Тинькофф)
+        369397980,  // Альфа-Банк
+        413284506,  // ВТБ Онлайн
+        646258329,  // Промсвязьбанк (ПСБ)
+        501939103,  // Открытие
+        4933992694, // Газпромбанк
+        460307228,  // Райффайзенбанк
+        564177498,  // ВКонтакте
+        481627348,  // 2ГИС
+        417281773,  // Авито
+        1206364806, // Совкомбанк (Халва)
+        6750455334, // Финграм (клиент Совкомбанк)
+        1439243764, // Мегамаркет
+        1629869891, // Ozon Банк
+        1634422317, // Яндекс Пэй
+        1467701468, // Au (Альфа)
+        6778332772, // AirT (Т-Банк)
+        594913976,  // Wildberries
+        1447012971, // Самокат
+        1154436683  // Золотое Яблоко
+    ]
+
+    public static func isDelistedFromAppStore(adamId: Int64, bundleId: String = "") -> Bool {
+        if delistedAdamIds.contains(adamId) { return true }
+        let b = bundleId.lowercased()
+        if b.contains("sber") || b.contains("tcsbank") || b.contains("tinkoff") ||
+           b.contains("alfabank") || b.contains("vtb") || b.contains("psbank") ||
+           b.contains("sovcom") || b.contains("open.client") || b.contains("gazprom") ||
+           b.contains("2gis") || b.contains("sbol") {
+            return true
+        }
+        return false
+    }
+
     private let coreDataEpochDiff: Double = 978307200.0 // Seconds between 1970 and 2001
 
     @Published public var connectedDevices: [DeviceInfo] = []
@@ -190,6 +247,11 @@ public class ConfiguratorEngine: ObservableObject {
     // Permissions State
     @Published public var isAccessibilityGranted: Bool = false
     @Published public var isAutomationGranted: Bool = false
+
+    // Update Checker State
+    @Published public var latestUpdateInfo: AppUpdateInfo? = nil
+    @Published public var isCheckingUpdates: Bool = false
+    @Published public var updateCheckError: String? = nil
 
     // Live Progress Tracking
     @Published public var operationProgress: Double = 0.0
@@ -2050,5 +2112,133 @@ public class ConfiguratorEngine: ObservableObject {
             return (success, msg)
         }
         return (false, "Не удалось получить лицензию")
+    }
+
+    // MARK: - Smart Analytics & Install Tracking
+
+    public func recordAppInstallation(adamId: Int64, bundleId: String = "", name: String = "") {
+        guard adamId > 0 else { return }
+        var counts = UserDefaults.standard.dictionary(forKey: "app_install_counts") as? [String: Int] ?? [:]
+        let key = String(adamId)
+        counts[key] = (counts[key] ?? 0) + 1
+        UserDefaults.standard.set(counts, forKey: "app_install_counts")
+
+        if !name.isEmpty {
+            var names = UserDefaults.standard.dictionary(forKey: "app_install_names") as? [String: String] ?? [:]
+            names[key] = name
+            UserDefaults.standard.set(names, forKey: "app_install_names")
+        }
+        LogManager.shared.log("📊 Зафиксирована установка «\(name)» (Adam ID: \(adamId)). Всего установок: \(counts[key] ?? 1)", level: "ANALYTICS")
+    }
+
+    public func getInstallCount(adamId: Int64) -> Int {
+        guard adamId > 0 else { return 0 }
+        let counts = UserDefaults.standard.dictionary(forKey: "app_install_counts") as? [String: Int] ?? [:]
+        return counts[String(adamId)] ?? 0
+    }
+
+    // MARK: - Software Updates Engine
+
+    public func checkForUpdates(currentVersion: String = "1.5.0") async -> (AppUpdateInfo?, String?) {
+        DispatchQueue.main.async {
+            self.isCheckingUpdates = true
+            self.updateCheckError = nil
+        }
+
+        defer {
+            DispatchQueue.main.async {
+                self.isCheckingUpdates = false
+            }
+        }
+
+        guard let url = URL(string: "https://api.github.com/repos/Shavlak_1/OpenRestore/releases/latest") else {
+            return (nil, "Неверный URL обновлений")
+        }
+
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        req.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return (nil, "Ошибка сети при проверке обновлений")
+            }
+
+            if httpResponse.statusCode == 404 {
+                let info = AppUpdateInfo(
+                    id: "v1.5.0",
+                    version: "v1.5.0",
+                    title: "OpenRestore v1.5.0",
+                    releaseNotes: "У вас установлена самая свежая версия программы.",
+                    downloadUrl: nil,
+                    publishedAt: "",
+                    isNewer: false
+                )
+                DispatchQueue.main.async {
+                    self.latestUpdateInfo = info
+                }
+                return (info, nil)
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let err = "Ошибка сервера GitHub (\(httpResponse.statusCode))"
+                DispatchQueue.main.async { self.updateCheckError = err }
+                return (nil, err)
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else {
+                let err = "Не удалось разобрать данные релиза"
+                DispatchQueue.main.async { self.updateCheckError = err }
+                return (nil, err)
+            }
+
+            let releaseName = (json["name"] as? String) ?? tagName
+            let body = (json["body"] as? String) ?? ""
+            let pubDate = (json["published_at"] as? String) ?? ""
+
+            var downloadUrl: String? = nil
+            if let assets = json["assets"] as? [[String: Any]] {
+                for asset in assets {
+                    if let dUrl = asset["browser_download_url"] as? String {
+                        if dUrl.hasSuffix(".dmg") || dUrl.hasSuffix(".zip") {
+                            downloadUrl = dUrl
+                            break
+                        }
+                    }
+                }
+            }
+            if downloadUrl == nil {
+                downloadUrl = json["html_url"] as? String
+            }
+
+            let cleanTag = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            let cleanCurrent = currentVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+
+            let isNewer = cleanTag.compare(cleanCurrent, options: .numeric) == .orderedDescending
+
+            let updateInfo = AppUpdateInfo(
+                id: tagName,
+                version: tagName,
+                title: releaseName,
+                releaseNotes: body,
+                downloadUrl: downloadUrl,
+                publishedAt: pubDate,
+                isNewer: isNewer
+            )
+
+            DispatchQueue.main.async {
+                self.latestUpdateInfo = updateInfo
+            }
+
+            return (updateInfo, nil)
+        } catch {
+            let errMsg = error.localizedDescription
+            DispatchQueue.main.async {
+                self.updateCheckError = errMsg
+            }
+            return (nil, errMsg)
+        }
     }
 }

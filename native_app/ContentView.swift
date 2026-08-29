@@ -61,15 +61,22 @@ struct ContentView: View {
     @State private var catalogApps: [AppItem] = []
     @State private var searchQuery: String = ""
     @State private var customAdamId: String = ""
-    @State private var selectedSidebar: SidebarItem = .device
     @State private var savedIPAs: [SavedIPA] = []
-    @State private var preferDirectMode: Bool = true
-    @State private var autoClickConfigurator: Bool = true
     @State private var bypassPermissionsGate: Bool = false
 
-    // Persisted settings
-    @AppStorage("appColorScheme") private var storedScheme: String = "system"
-    @AppStorage("libraryPath")    private var customLibraryPath: String = ""
+    // Persisted settings (Zero-reprompt and full state restoration)
+    @AppStorage("appColorScheme")          private var storedScheme: String = "system"
+    @AppStorage("libraryPath")             private var customLibraryPath: String = ""
+    @AppStorage("selectedSidebarTab")      private var storedSidebarTab: String = SidebarItem.device.rawValue
+    @AppStorage("preferDirectMode")        private var preferDirectMode: Bool = true
+    @AppStorage("autoClickConfigurator")   private var autoClickConfigurator: Bool = true
+    @AppStorage("autoCheckUpdates")        private var autoCheckUpdates: Bool = true
+    @AppStorage("catalogSortMode")         private var catalogSortMode: String = "popularity"
+    @AppStorage("selectedCatalogCategory") private var selectedCatalogCategory: String = "Все"
+
+    var selectedSidebar: SidebarItem {
+        SidebarItem(rawValue: storedSidebarTab) ?? .device
+    }
 
     // Batch download state
     @State private var selectedAdamIds: Set<Int64> = []
@@ -79,7 +86,6 @@ struct ContentView: View {
 
     @State private var appToDeleteIPA: (name: String, path: String)? = nil
     @State private var showDeleteIPAConfirm: Bool = false
-    @State private var selectedCatalogCategory: String = "Все"
     @State private var showDeviceInfoSheet: Bool = false
     @State private var showAppleIdSheet: Bool = false
 
@@ -133,15 +139,52 @@ struct ContentView: View {
         }
     }
 
-    var catalogCategories: [String] {
-        var cats = Set(catalogApps.map { $0.category })
-        cats.remove("")
-        return ["Все"] + cats.sorted()
+    var smartCatalogFilters: [String] {
+        let base = ["Все", "🔥 Популярные", "🚫 Нет в App Store", "📲 На iPhone", "💾 В библиотеке"]
+        let customCats = Set(catalogApps.map { $0.category }).filter { !$0.isEmpty }.sorted()
+        return base + customCats
+    }
+
+    var sortModeTitle: String {
+        switch catalogSortMode {
+        case "name": return "По названию"
+        case "delisted": return "Сначала удалённые"
+        case "saved": return "Сначала на Mac"
+        default: return "По популярности"
+        }
     }
 
     var filteredCatalogApps: [AppItem] {
         var list = catalogApps
-        if selectedCatalogCategory != "Все" { list = list.filter { $0.category == selectedCatalogCategory } }
+
+        // Category & Smart Filter
+        switch selectedCatalogCategory {
+        case "Все":
+            break
+        case "🔥 Популярные":
+            list = list.filter {
+                engine.getInstallCount(adamId: $0.adam_id) > 0 ||
+                ConfiguratorEngine.isDelistedFromAppStore(adamId: $0.adam_id, bundleId: $0.bundle_id)
+            }
+        case "🚫 Нет в App Store":
+            list = list.filter {
+                ConfiguratorEngine.isDelistedFromAppStore(adamId: $0.adam_id, bundleId: $0.bundle_id)
+            }
+        case "📲 На iPhone":
+            let devBundleIds = Set(engine.oldDeviceApps.map { $0.bundleId.lowercased() })
+            let devAdamIds = Set(engine.oldDeviceApps.compactMap { $0.adamId })
+            list = list.filter {
+                devAdamIds.contains($0.adam_id) || devBundleIds.contains($0.bundle_id.lowercased())
+            }
+        case "💾 В библиотеке":
+            list = list.filter {
+                isSavedInLibrary(adamId: $0.adam_id, name: $0.name, bundleId: $0.bundle_id) != nil
+            }
+        default:
+            list = list.filter { $0.category == selectedCatalogCategory }
+        }
+
+        // Search query
         if !searchQuery.isEmpty {
             let q = searchQuery.lowercased()
             list = list.filter {
@@ -151,6 +194,37 @@ struct ContentView: View {
                 $0.bundle_id.lowercased().contains(q)
             }
         }
+
+        // Sorting
+        switch catalogSortMode {
+        case "name":
+            list.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case "delisted":
+            list.sort { a, b in
+                let aDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: a.adam_id, bundleId: a.bundle_id)
+                let bDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: b.adam_id, bundleId: b.bundle_id)
+                if aDel != bDel { return aDel && !bDel }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+        case "saved":
+            list.sort { a, b in
+                let aSaved = isSavedInLibrary(adamId: a.adam_id, name: a.name, bundleId: a.bundle_id) != nil
+                let bSaved = isSavedInLibrary(adamId: b.adam_id, name: b.name, bundleId: b.bundle_id) != nil
+                if aSaved != bSaved { return aSaved && !bSaved }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+        default: // popularity
+            list.sort { a, b in
+                let aCount = engine.getInstallCount(adamId: a.adam_id)
+                let bCount = engine.getInstallCount(adamId: b.adam_id)
+                if aCount != bCount { return aCount > bCount }
+                let aDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: a.adam_id, bundleId: a.bundle_id)
+                let bDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: b.adam_id, bundleId: b.bundle_id)
+                if aDel != bDel { return aDel && !bDel }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+        }
+
         return list
     }
 
@@ -455,7 +529,7 @@ struct ContentView: View {
 
         return Button(action: {
             withAnimation(.easeInOut(duration: 0.15)) {
-                selectedSidebar = item
+                storedSidebarTab = item.rawValue
             }
         }) {
             HStack(spacing: 10) {
@@ -784,36 +858,58 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 if let aid = app.adamId, aid > 0 {
                     if let saved = savedIPA {
-                        Button("Установить") {
-                            startInstallFlow(ipaPath: saved.path, name: app.displayName)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                        .controlSize(.small)
-
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
                         }) {
-                            Label("Скачать заново", systemImage: "arrow.clockwise")
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .medium))
+                                .frame(width: 22, height: 26)
                         }
                         .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Скачать IPA заново")
+
+                        Button(action: {
+                            startInstallFlow(ipaPath: saved.path, name: app.displayName)
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10))
+                                Text("Установить")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .frame(width: 94, height: 26)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
                         .controlSize(.small)
                     } else {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
                         }) {
-                            Label("Скачать", systemImage: "arrow.down.circle")
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 11, weight: .medium))
+                                .frame(width: 22, height: 26)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .help("Скачать IPA в Библиотеку")
 
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: true)
                         }) {
-                            Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.down.to.line.compact")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Установить")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .frame(width: 94, height: 26)
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(.blue)
                         .controlSize(.small)
+                        .help("Скачать и установить на iPhone")
                     }
                 } else {
                     Button("Указать ID") {
@@ -825,6 +921,7 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .foregroundColor(.orange)
+                    .frame(width: 124, height: 26)
                 }
 
                 Button(action: {
@@ -839,10 +936,12 @@ struct ContentView: View {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
                         .foregroundColor(.red.opacity(0.75))
+                        .frame(width: 20, height: 26)
                 }
                 .buttonStyle(.plain)
                 .help("Удалить IPA из библиотеки (без удаления с iPhone)")
             }
+            .frame(width: 156, alignment: .trailing)
         }
         .padding(.vertical, 4)
     }
@@ -876,13 +975,53 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
+
+                    // Sort menu
+                    Menu {
+                        Button(action: { catalogSortMode = "popularity" }) {
+                            HStack {
+                                Text("По популярности и частоте")
+                                if catalogSortMode == "popularity" { Image(systemName: "checkmark") }
+                            }
+                        }
+                        Button(action: { catalogSortMode = "delisted" }) {
+                            HStack {
+                                Text("Сначала удалённые из App Store")
+                                if catalogSortMode == "delisted" { Image(systemName: "checkmark") }
+                            }
+                        }
+                        Button(action: { catalogSortMode = "saved" }) {
+                            HStack {
+                                Text("Сначала сохранённые на Mac")
+                                if catalogSortMode == "saved" { Image(systemName: "checkmark") }
+                            }
+                        }
+                        Button(action: { catalogSortMode = "name" }) {
+                            HStack {
+                                Text("По названию (А-Я)")
+                                if catalogSortMode == "name" { Image(systemName: "checkmark") }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.arrow.down")
+                                .font(.system(size: 11))
+                            Text(sortModeTitle)
+                                .font(.system(size: 11))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.primary.opacity(0.06))
+                        .cornerRadius(6)
+                    }
+                    .menuStyle(.borderlessButton)
                 }
             }
 
-            // Categories Bar
+            // Smart Filter Chips Bar
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(catalogCategories, id: \.self) { cat in
+                    ForEach(smartCatalogFilters, id: \.self) { cat in
                         let isSel = selectedCatalogCategory == cat
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.15)) { selectedCatalogCategory = cat }
@@ -911,24 +1050,36 @@ struct ContentView: View {
 
             // Grid
             ScrollView {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    ForEach(filteredCatalogApps) { item in
-                        catalogAppCard(item: item)
+                if filteredCatalogApps.isEmpty {
+                    emptyStateView(
+                        icon: "square.grid.2x2",
+                        title: "Приложения не найдены",
+                        subtitle: "Попробуйте изменить категорию или поисковый запрос"
+                    )
+                    .padding(.top, 40)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(filteredCatalogApps) { item in
+                            catalogAppCard(item: item)
+                        }
                     }
+                    .padding(16)
                 }
-                .padding(16)
             }
         }
     }
 
     private func catalogAppCard(item: AppItem) -> some View {
         let savedIPA = isSavedInLibrary(adamId: item.adam_id, name: item.name, bundleId: item.bundle_id)
+        let isDelisted = ConfiguratorEngine.isDelistedFromAppStore(adamId: item.adam_id, bundleId: item.bundle_id)
+        let installCount = engine.getInstallCount(adamId: item.adam_id)
+        let isOnDevice = engine.oldDeviceApps.contains { $0.adamId == item.adam_id || $0.bundleId.lowercased() == item.bundle_id.lowercased() }
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: 10) {
             appIconView(url: nil, name: item.name)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
                     Text(item.name)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.primary)
@@ -938,13 +1089,56 @@ struct ContentView: View {
                         Image(systemName: "checkmark.seal.fill")
                             .font(.system(size: 11))
                             .foregroundColor(.green)
+                            .help("Сохранено в локальной библиотеке на Mac")
+                    }
+                }
+
+                // Badges row
+                HStack(spacing: 4) {
+                    if isDelisted {
+                        HStack(spacing: 2) {
+                            Circle().fill(Color.orange).frame(width: 4, height: 4)
+                            Text("Удалено из Store")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.orange)
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.12))
+                        .cornerRadius(4)
+                    }
+
+                    if isOnDevice {
+                        HStack(spacing: 2) {
+                            Image(systemName: "iphone")
+                                .font(.system(size: 7))
+                            Text("На iPhone")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundColor(.teal)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.teal.opacity(0.12))
+                        .cornerRadius(4)
+                    }
+
+                    if installCount > 0 {
+                        HStack(spacing: 2) {
+                            Text("🔥 \(installCount)")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.12))
+                        .cornerRadius(4)
                     }
                 }
 
                 Text(item.description)
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
 
                 HStack(spacing: 4) {
                     Text("ID: \(String(item.adam_id))")
@@ -959,49 +1153,69 @@ struct ContentView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            if let saved = savedIPA {
-                HStack(spacing: 6) {
-                    Button("Установить") {
+            // Symmetrical, fixed-width action buttons container
+            HStack(spacing: 6) {
+                if let saved = savedIPA {
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 22, height: 26)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Скачать IPA заново из App Store")
+
+                    Button(action: {
                         startInstallFlow(ipaPath: saved.path, name: item.name)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                            Text("Установить")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .frame(width: 94, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                     .controlSize(.small)
-
+                } else {
                     Button(action: {
                         startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
                     }) {
-                        Label("Скачать заново", systemImage: "arrow.clockwise")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            } else {
-                HStack(spacing: 6) {
-                    Button(action: {
-                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
-                    }) {
-                        Label("Скачать", systemImage: "arrow.down.circle")
+                        Image(systemName: "arrow.down.circle")
                             .font(.system(size: 11, weight: .medium))
+                            .frame(width: 22, height: 26)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .help("Скачать IPA в Библиотеку на Mac")
 
                     Button(action: {
                         startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: true)
                     }) {
-                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.to.line.compact")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Установить")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .frame(width: 94, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                     .controlSize(.small)
+                    .help("Скачать и установить на подключенный iPhone")
                 }
             }
+            .frame(width: 136, alignment: .trailing)
         }
-        .padding(12)
+        .padding(10)
+        .frame(height: 84)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1090,47 +1304,65 @@ struct ContentView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            if let saved = savedIPA {
-                HStack(spacing: 6) {
-                    Button("Установить") {
+            HStack(spacing: 6) {
+                if let saved = savedIPA {
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 22, height: 26)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Скачать IPA заново")
+
+                    Button(action: {
                         startInstallFlow(ipaPath: saved.path, name: item.name)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                            Text("Установить")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .frame(width: 94, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                     .controlSize(.small)
-
+                } else {
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
                     }) {
-                        Label("Скачать заново", systemImage: "arrow.clockwise")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            } else {
-                HStack(spacing: 6) {
-                    Button(action: {
-                        startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
-                    }) {
-                        Label("Скачать", systemImage: "arrow.down.circle")
+                        Image(systemName: "arrow.down.circle")
                             .font(.system(size: 11, weight: .medium))
+                            .frame(width: 22, height: 26)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .help("Скачать IPA в Библиотеку")
 
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: true)
                     }) {
-                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.to.line.compact")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Установить")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .frame(width: 94, height: 26)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                     .controlSize(.small)
+                    .help("Скачать и установить на iPhone")
                 }
             }
+            .frame(width: 136, alignment: .trailing)
         }
         .padding(.vertical, 4)
     }
@@ -1628,7 +1860,109 @@ struct ContentView: View {
                     }
                 }
 
-                // Section 5: About
+                // Section 5: Software Updates
+                settingsCard(title: "Обновления программы", icon: "arrow.triangle.2.circlepath.circle.fill", iconColor: .teal) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Текущая версия: OpenRestore v1.5.0")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Сборка для macOS (Apple Silicon & Intel)")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button(action: {
+                                Task {
+                                    _ = await engine.checkForUpdates()
+                                }
+                            }) {
+                                HStack(spacing: 6) {
+                                    if engine.isCheckingUpdates {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                        Text("Проверка...")
+                                    } else {
+                                        Image(systemName: "arrow.clockwise")
+                                        Text("Проверить обновления")
+                                    }
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.teal)
+                            .controlSize(.small)
+                            .disabled(engine.isCheckingUpdates)
+                        }
+
+                        Divider()
+
+                        Toggle(isOn: $autoCheckUpdates) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Автоматически проверять обновления при запуске")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Приложение будет оповещать вас о выходе новых версий с GitHub.")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        if let info = engine.latestUpdateInfo {
+                            if info.isNewer {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Image(systemName: "sparkles")
+                                            .foregroundColor(.yellow)
+                                        Text("Доступна новая версия: \(info.version)!")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(.green)
+                                        Spacer()
+                                        if let dUrl = info.downloadUrl, let url = URL(string: dUrl) {
+                                            Button("Скачать обновление") {
+                                                NSWorkspace.shared.open(url)
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(.green)
+                                            .controlSize(.small)
+                                        }
+                                    }
+
+                                    if !info.releaseNotes.isEmpty {
+                                        Text(info.releaseNotes)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(4)
+                                    }
+                                }
+                                .padding(10)
+                                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .foregroundColor(.green)
+                                    Text("У вас установлена самая актуальная версия программы (\(info.version)).")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(8)
+                                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 6))
+                            }
+                        } else if let err = engine.updateCheckError {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                                Text("Ошибка проверки: \(err)")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(8)
+                            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                }
+
+                // Section 6: About
                 settingsCard(title: "О программе OpenRestore", icon: "info.circle.fill", iconColor: .secondary) {
                     HStack(spacing: 12) {
                         Image(systemName: "bolt.horizontal.circle.fill")
