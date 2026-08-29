@@ -12,14 +12,35 @@ echo "=========================================="
 echo "  OpenRestore v${VERSION} — Сборка Релиза"
 echo "=========================================="
 
-# 1. Rebuild app
+# 1. Rebuild Universal app
 ./build_app.sh
 
 mkdir -p "$DIST_DIR"
 rm -rf "$DIST_DIR"/*
 
-# 2. Package ZIP release
-echo "📦 Создание ZIP-архива..."
+# 2. Helper function to create DMG
+create_dmg() {
+    local arch_name="$1"
+    local dmg_filename="$2"
+    local tmp_dir="$DIST_DIR/tmp_dmg_${arch_name}"
+
+    mkdir -p "$tmp_dir"
+    cp -R OpenRestore.app "$tmp_dir/"
+    cp OpenRestore.command "$tmp_dir/"
+    cp README.md "$tmp_dir/"
+    cp INSTRUCTIONS.md "$tmp_dir/"
+    ln -s /Applications "$tmp_dir/Applications"
+
+    hdiutil create -volname "OpenRestore v${VERSION} (${arch_name})" -srcfolder "$tmp_dir" -ov -format UDZO "$DIST_DIR/$dmg_filename" -quiet
+    rm -rf "$tmp_dir"
+}
+
+# 3. Create Universal Release (Works on both Apple Silicon & Intel)
+echo "💿 Создание Universal DMG-образа (Apple Silicon + Intel)..."
+create_dmg "Universal" "OpenRestore-v${VERSION}-macOS.dmg"
+cp "$DIST_DIR/OpenRestore-v${VERSION}-macOS.dmg" "$DIST_DIR/OpenRestore-v${VERSION}-Universal.dmg"
+
+echo "📦 Создание Universal ZIP-архива..."
 ZIP_NAME="OpenRestore-v${VERSION}-macOS.zip"
 ditto -c -k --sequesterRsrc --keepParent OpenRestore.app "$DIST_DIR/OpenRestore.app.zip"
 (
@@ -27,29 +48,18 @@ ditto -c -k --sequesterRsrc --keepParent OpenRestore.app "$DIST_DIR/OpenRestore.
     zip -r -q "$DIST_DIR/$ZIP_NAME" OpenRestore.app OpenRestore.command README.md INSTRUCTIONS.md CONFIGURATOR_GUIDE.md CHANGELOG.md LICENSE catalog.json
 )
 
-# 3. Package DMG release (if hdiutil available)
-echo "💿 Создание DMG-образа..."
-DMG_NAME="OpenRestore-v${VERSION}-macOS.dmg"
-DMG_TMP="$DIST_DIR/tmp_dmg"
-mkdir -p "$DMG_TMP"
-cp -R OpenRestore.app "$DMG_TMP/"
-cp OpenRestore.command "$DMG_TMP/"
-cp README.md "$DMG_TMP/"
-cp INSTRUCTIONS.md "$DMG_TMP/"
-ln -s /Applications "$DMG_TMP/Applications"
-
-hdiutil create -volname "OpenRestore v${VERSION}" -srcfolder "$DMG_TMP" -ov -format UDZO "$DIST_DIR/$DMG_NAME" -quiet
-rm -rf "$DMG_TMP"
-
 # 4. Generate Checksums
 echo "🔐 Вычисление контрольных сумм SHA256..."
 (
     cd "$DIST_DIR"
-    shasum -a 256 "$ZIP_NAME" > "${ZIP_NAME}.sha256"
-    shasum -a 256 "$DMG_NAME" > "${DMG_NAME}.sha256"
+    for f in *.dmg *.zip; do
+        if [ -f "$f" ]; then
+            shasum -a 256 "$f" > "${f}.sha256"
+        fi
+    done
 )
 
 echo "=========================================="
-echo "🎉 Релиз v${VERSION} успешно собран в папке dist/:"
+echo "🎉 Релизы v${VERSION} успешно собраны (Universal 2: Intel + Apple Silicon) в папке dist/:"
 ls -lh "$DIST_DIR"
 echo "=========================================="

@@ -140,7 +140,7 @@ struct ContentView: View {
     }
 
     var smartCatalogFilters: [String] {
-        let base = ["Все", "🔥 Популярные", "🚫 Нет в App Store", "📲 На iPhone", "💾 В библиотеке"]
+        let base = ["Все", "🔥 Популярные", "📲 На iPhone", "💾 В библиотеке"]
         let customCats = Set(catalogApps.map { $0.category }).filter { !$0.isEmpty }.sorted()
         return base + customCats
     }
@@ -148,7 +148,6 @@ struct ContentView: View {
     var sortModeTitle: String {
         switch catalogSortMode {
         case "name": return "По названию"
-        case "delisted": return "Сначала удалённые"
         case "saved": return "Сначала на Mac"
         default: return "По популярности"
         }
@@ -164,10 +163,6 @@ struct ContentView: View {
         case "🔥 Популярные":
             list = list.filter {
                 engine.getInstallCount(adamId: $0.adam_id) > 0 ||
-                ConfiguratorEngine.isDelistedFromAppStore(adamId: $0.adam_id, bundleId: $0.bundle_id)
-            }
-        case "🚫 Нет в App Store":
-            list = list.filter {
                 ConfiguratorEngine.isDelistedFromAppStore(adamId: $0.adam_id, bundleId: $0.bundle_id)
             }
         case "📲 На iPhone":
@@ -199,13 +194,6 @@ struct ContentView: View {
         switch catalogSortMode {
         case "name":
             list.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        case "delisted":
-            list.sort { a, b in
-                let aDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: a.adam_id, bundleId: a.bundle_id)
-                let bDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: b.adam_id, bundleId: b.bundle_id)
-                if aDel != bDel { return aDel && !bDel }
-                return a.name.localizedStandardCompare(b.name) == .orderedAscending
-            }
         case "saved":
             list.sort { a, b in
                 let aSaved = isSavedInLibrary(adamId: a.adam_id, name: a.name, bundleId: a.bundle_id) != nil
@@ -218,9 +206,6 @@ struct ContentView: View {
                 let aCount = engine.getInstallCount(adamId: a.adam_id)
                 let bCount = engine.getInstallCount(adamId: b.adam_id)
                 if aCount != bCount { return aCount > bCount }
-                let aDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: a.adam_id, bundleId: a.bundle_id)
-                let bDel = ConfiguratorEngine.isDelistedFromAppStore(adamId: b.adam_id, bundleId: b.bundle_id)
-                if aDel != bDel { return aDel && !bDel }
                 return a.name.localizedStandardCompare(b.name) == .orderedAscending
             }
         }
@@ -976,12 +961,6 @@ struct ContentView: View {
                                 if catalogSortMode == "popularity" { Image(systemName: "checkmark") }
                             }
                         }
-                        Button(action: { catalogSortMode = "delisted" }) {
-                            HStack {
-                                Text("Сначала удалённые из App Store")
-                                if catalogSortMode == "delisted" { Image(systemName: "checkmark") }
-                            }
-                        }
                         Button(action: { catalogSortMode = "saved" }) {
                             HStack {
                                 Text("Сначала сохранённые на Mac")
@@ -1063,7 +1042,6 @@ struct ContentView: View {
 
     private func catalogAppCard(item: AppItem) -> some View {
         let savedIPA = isSavedInLibrary(adamId: item.adam_id, name: item.name, bundleId: item.bundle_id)
-        let isDelisted = ConfiguratorEngine.isDelistedFromAppStore(adamId: item.adam_id, bundleId: item.bundle_id)
         let installCount = engine.getInstallCount(adamId: item.adam_id)
         let isOnDevice = engine.oldDeviceApps.contains { $0.adamId == item.adam_id || $0.bundleId.lowercased() == item.bundle_id.lowercased() }
 
@@ -1087,19 +1065,6 @@ struct ContentView: View {
 
                 // Badges row
                 HStack(spacing: 4) {
-                    if isDelisted {
-                        HStack(spacing: 2) {
-                            Circle().fill(Color.orange).frame(width: 4, height: 4)
-                            Text("Удалено из Store")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(.orange)
-                        }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.12))
-                        .cornerRadius(4)
-                    }
-
                     if isOnDevice {
                         HStack(spacing: 2) {
                             Image(systemName: "iphone")

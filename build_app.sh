@@ -53,13 +53,24 @@ cat << 'ENT' > openrestore.entitlements
 </plist>
 ENT
 
-swiftc -O -parse-as-library \
+echo "Компиляция нативного Universal 2 приложения (Apple Silicon arm64 + Intel x86_64)..."
+mkdir -p build_tmp OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources module_cache
+
+swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
   -module-cache-path ./module_cache \
   native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
-  -lsqlite3 -o OpenRestore.app/Contents/MacOS/OpenRestore
+  -lsqlite3 -o build_tmp/OpenRestore_arm64
+
+swiftc -O -parse-as-library -target x86_64-apple-macos13.0 \
+  -module-cache-path ./module_cache \
+  native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
+  -lsqlite3 -o build_tmp/OpenRestore_x86_64
+
+lipo -create build_tmp/OpenRestore_arm64 build_tmp/OpenRestore_x86_64 -output OpenRestore.app/Contents/MacOS/OpenRestore
+rm -rf build_tmp
 
 cp catalog.json OpenRestore.app/Contents/Resources/catalog.json
 
 codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - OpenRestore.app
 
-echo "Готово! OpenRestore.app успешно собрано и подписано."
+echo "Готово! OpenRestore.app успешно собрано (Universal 2: arm64 + x86_64) и подписано."
