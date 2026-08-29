@@ -78,7 +78,7 @@ public struct AppUpdateInfo: Identifiable, Equatable, Sendable {
 }
 
 // MARK: - Centralized Log Manager for Diagnostics & Debugging
-public class LogManager: ObservableObject {
+public final class LogManager: ObservableObject, @unchecked Sendable {
     public static let shared = LogManager()
 
     @Published public var recentLogs: [String] = []
@@ -171,7 +171,7 @@ public class LogManager: ObservableObject {
     }
 }
 
-public class ConfiguratorEngine: ObservableObject {
+public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     public static let shared = ConfiguratorEngine()
 
     public static let defaultDBPath: String = {
