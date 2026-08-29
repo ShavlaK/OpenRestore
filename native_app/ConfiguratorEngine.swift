@@ -26,7 +26,7 @@ public struct AppItem: Identifiable, Codable, Hashable {
     public let description: String
 }
 
-public struct PurchasedApp: Identifiable, Hashable {
+public struct PurchasedApp: Identifiable, Hashable, Sendable {
     public var id: Int64 { adamId }
     public let adamId: Int64
     public let name: String
@@ -47,7 +47,7 @@ public struct DeviceInstalledApp: Identifiable, Hashable, Sendable {
     public var artworkUrl: String?
 }
 
-public struct IPAResult {
+public struct IPAResult: Sendable {
     public let path: String
     public let appName: String
     public let bundleId: String
@@ -57,7 +57,7 @@ public struct IPAResult {
     public let hasFairPlay: Bool
 }
 
-public struct AppUpdateInfo: Identifiable, Equatable {
+public struct AppUpdateInfo: Identifiable, Equatable, Sendable {
     public let id: String
     public let version: String
     public let title: String
@@ -2139,16 +2139,13 @@ public class ConfiguratorEngine: ObservableObject {
 
     // MARK: - Software Updates Engine
 
+    @MainActor
     public func checkForUpdates(currentVersion: String = "1.5.0") async -> (AppUpdateInfo?, String?) {
-        DispatchQueue.main.async {
-            self.isCheckingUpdates = true
-            self.updateCheckError = nil
-        }
+        self.isCheckingUpdates = true
+        self.updateCheckError = nil
 
         defer {
-            DispatchQueue.main.async {
-                self.isCheckingUpdates = false
-            }
+            self.isCheckingUpdates = false
         }
 
         guard let url = URL(string: "https://api.github.com/repos/Shavlak_1/OpenRestore/releases/latest") else {
@@ -2175,22 +2172,20 @@ public class ConfiguratorEngine: ObservableObject {
                     publishedAt: "",
                     isNewer: false
                 )
-                DispatchQueue.main.async {
-                    self.latestUpdateInfo = info
-                }
+                self.latestUpdateInfo = info
                 return (info, nil)
             }
 
             guard httpResponse.statusCode == 200 else {
                 let err = "Ошибка сервера GitHub (\(httpResponse.statusCode))"
-                DispatchQueue.main.async { self.updateCheckError = err }
+                self.updateCheckError = err
                 return (nil, err)
             }
 
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tagName = json["tag_name"] as? String else {
                 let err = "Не удалось разобрать данные релиза"
-                DispatchQueue.main.async { self.updateCheckError = err }
+                self.updateCheckError = err
                 return (nil, err)
             }
 
@@ -2228,16 +2223,11 @@ public class ConfiguratorEngine: ObservableObject {
                 isNewer: isNewer
             )
 
-            DispatchQueue.main.async {
-                self.latestUpdateInfo = updateInfo
-            }
-
+            self.latestUpdateInfo = updateInfo
             return (updateInfo, nil)
         } catch {
             let errMsg = error.localizedDescription
-            DispatchQueue.main.async {
-                self.updateCheckError = errMsg
-            }
+            self.updateCheckError = errMsg
             return (nil, errMsg)
         }
     }
