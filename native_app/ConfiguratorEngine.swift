@@ -1923,23 +1923,49 @@ public class ConfiguratorEngine: ObservableObject {
     }
 
     public func openConfiguratorAccountDialog() {
+        DispatchQueue.main.async {
+            self.isAppleIdAuthenticated = false
+            self.activeAppleIdEmail = ""
+            self.activeAppleIdName = ""
+            self.currentAccountDsid = ""
+            self.purchasedApps = []
+        }
+
         openConfigurator()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            let script = NSAppleScript(source: """
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            let scriptSource = """
             tell application "Apple Configurator" to activate
             tell application "System Events"
                 tell process "Apple Configurator"
                     try
-                        click menu item 1 of menu 1 of menu bar item "Учетная запись" of menu bar 1
-                    on error
-                        try
-                            click menu item 1 of menu 1 of menu bar item "Account" of menu bar 1
-                        end try
+                        tell menu bar 1
+                            repeat with mi in menu bar items
+                                if (name of mi is "Учетная запись" or name of mi is "Account") then
+                                    if (exists menu item "Sign Out…" of menu 1 of mi) then
+                                        click menu item "Sign Out…" of menu 1 of mi
+                                        delay 0.8
+                                    else if (exists menu item "Выйти…" of menu 1 of mi) then
+                                        click menu item "Выйти…" of menu 1 of mi
+                                        delay 0.8
+                                    end if
+
+                                    if (exists menu item "Sign In…" of menu 1 of mi) then
+                                        click menu item "Sign In…" of menu 1 of mi
+                                    else if (exists menu item "Войти…" of menu 1 of mi) then
+                                        click menu item "Войти…" of menu 1 of mi
+                                    else
+                                        click menu item 1 of menu 1 of mi
+                                    end if
+                                    exit repeat
+                                end if
+                            end repeat
+                        end tell
                     end try
                 end tell
             end tell
-            """)
+            """
             var errInfo: NSDictionary?
+            let script = NSAppleScript(source: scriptSource)
             _ = script?.executeAndReturnError(&errInfo)
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {

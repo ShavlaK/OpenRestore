@@ -1820,10 +1820,49 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                 }
+
+                // Step-by-step manual guide
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 13))
+                        Text("Инструкция по ручной смене Apple ID:")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.primary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("1.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
+                            Text("В окне **Apple Configurator** в строке меню выберите **Учётная запись (Account)**.").font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("2.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
+                            Text("Нажмите **Выйти… (Sign Out)** (если уже выполнен вход), затем **Войти… (Sign In)**.").font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("3.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
+                            Text("Введите Apple ID и пароль, с которого приобретены нужные приложения.").font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("4.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
+                            Text("Вернитесь в OpenRestore — аккаунт и список покупок подтянутся автоматически!").font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.leading, 4)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+                )
             }
             .padding(20)
         }
-        .frame(width: 480)
+        .frame(width: 500)
     }
 
     // MARK: - Restore & Install Progress Sheet
