@@ -77,8 +77,8 @@ struct ContentView: View {
     @State private var batchTotal: Int = 0
     @State private var batchDone: Int = 0
 
-    @State private var appToUninstall: DeviceInstalledApp? = nil
-    @State private var showUninstallConfirm: Bool = false
+    @State private var appToDeleteIPA: (name: String, path: String)? = nil
+    @State private var showDeleteIPAConfirm: Bool = false
     @State private var selectedCatalogCategory: String = "Все"
     @State private var showDeviceInfoSheet: Bool = false
     @State private var showAppleIdSheet: Bool = false
@@ -220,18 +220,17 @@ struct ContentView: View {
             Alert(title: Text("OpenRestore"), message: Text(alertMessage ?? ""),
                   dismissButton: .default(Text("OK")))
         }
-        .alert(isPresented: $showUninstallConfirm) {
+
+        .alert(isPresented: $showDeleteIPAConfirm) {
             Alert(
-                title: Text("Удалить приложение?"),
-                message: Text("Удалить «\(appToUninstall?.displayName ?? "")» с подключенного iPhone?"),
-                primaryButton: .destructive(Text("Удалить")) {
-                    if let app = appToUninstall {
-                        Task {
-                            let (ok, msg) = await engine.uninstallApp(bundleId: app.bundleId)
-                            alertMessage = ok ? "«\(app.displayName)» удалено с устройства." : "Ошибка: \(msg)"
-                            showAlert = true
-                            engine.scanInstalledAppsFromDevice(catalog: catalogApps)
-                        }
+                title: Text("Удалить IPA из библиотеки?"),
+                message: Text("Удалить сохранённый файл «\(appToDeleteIPA?.name ?? "")» из папки Библиотеки?\n\nС вашего iPhone приложение удалено НЕ будет и продолжит работать."),
+                primaryButton: .destructive(Text("Удалить из библиотеки")) {
+                    if let item = appToDeleteIPA {
+                        try? FileManager.default.removeItem(atPath: item.path)
+                        loadSavedIPAs()
+                        alertMessage = "Файл «\(item.name)» удален из библиотеки. Приложение на iPhone сохранено."
+                        showAlert = true
                     }
                 },
                 secondaryButton: .cancel(Text("Отмена"))
@@ -791,6 +790,14 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
                         .controlSize(.small)
+
+                        Button(action: {
+                            startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
+                        }) {
+                            Label("Скачать заново", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     } else {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
@@ -798,6 +805,14 @@ struct ContentView: View {
                             Label("Скачать", systemImage: "arrow.down.circle")
                         }
                         .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button(action: {
+                            startRestoreFlow(adamId: aid, name: app.name, installToDevice: true)
+                        }) {
+                            Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                     }
                 } else {
@@ -813,15 +828,20 @@ struct ContentView: View {
                 }
 
                 Button(action: {
-                    appToUninstall = app
-                    showUninstallConfirm = true
+                    if let saved = savedIPA {
+                        appToDeleteIPA = (name: URL(fileURLWithPath: saved.path).lastPathComponent, path: saved.path)
+                        showDeleteIPAConfirm = true
+                    } else {
+                        alertMessage = "Файл IPA для «\(app.displayName)» отсутствует в локальной библиотеке.\n\nНапоминание: приложение с iPhone пользователя НЕ удаляется."
+                        showAlert = true
+                    }
                 }) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
                         .foregroundColor(.red.opacity(0.75))
                 }
                 .buttonStyle(.plain)
-                .help("Удалить с iPhone")
+                .help("Удалить IPA из библиотеки (без удаления с iPhone)")
             }
         }
         .padding(.vertical, 4)
@@ -942,21 +962,43 @@ struct ContentView: View {
             Spacer()
 
             if let saved = savedIPA {
-                Button("Установить") {
-                    startInstallFlow(ipaPath: saved.path, name: item.name)
+                HStack(spacing: 6) {
+                    Button("Установить") {
+                        startInstallFlow(ipaPath: saved.path, name: item.name)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .controlSize(.small)
+
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
+                    }) {
+                        Label("Скачать заново", systemImage: "arrow.clockwise")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-                .controlSize(.small)
             } else {
-                Button(action: {
-                    startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
-                }) {
-                    Text("Скачать")
-                        .font(.system(size: 11, weight: .semibold))
+                HStack(spacing: 6) {
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: false)
+                    }) {
+                        Label("Скачать", systemImage: "arrow.down.circle")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adam_id, name: item.name, installToDevice: true)
+                    }) {
+                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
         }
         .padding(12)
@@ -1051,20 +1093,43 @@ struct ContentView: View {
             Spacer()
 
             if let saved = savedIPA {
-                Button("Установить") {
-                    startInstallFlow(ipaPath: saved.path, name: item.name)
+                HStack(spacing: 6) {
+                    Button("Установить") {
+                        startInstallFlow(ipaPath: saved.path, name: item.name)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .controlSize(.small)
+
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
+                    }) {
+                        Label("Скачать заново", systemImage: "arrow.clockwise")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-                .controlSize(.small)
             } else {
-                Button(action: {
-                    startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
-                }) {
-                    Label("Скачать IPA", systemImage: "arrow.down.circle")
+                HStack(spacing: 6) {
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
+                    }) {
+                        Label("Скачать", systemImage: "arrow.down.circle")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button(action: {
+                        startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: true)
+                    }) {
+                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
         }
         .padding(.vertical, 4)
@@ -1095,24 +1160,40 @@ struct ContentView: View {
                         .frame(maxWidth: 380)
                 }
 
-                HStack(spacing: 10) {
+                VStack(spacing: 12) {
                     TextField("Например: 570510529", text: $customAdamId)
                         .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 13, design: .monospaced))
-                        .frame(width: 260)
+                        .font(.system(size: 14, design: .monospaced))
+                        .frame(width: 320)
                         .onSubmit {
                             if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
                                 startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
                             }
                         }
 
-                    Button("Начать загрузку") {
-                        if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
-                            startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
+                    HStack(spacing: 10) {
+                        Button(action: {
+                            if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
+                                startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
+                            }
+                        }) {
+                            Label("Скачать IPA", systemImage: "arrow.down.circle")
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
+
+                        Button(action: {
+                            if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
+                                startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: true)
+                            }
+                        }) {
+                            Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
                 }
             }
             .padding(32)

@@ -211,15 +211,18 @@ public class ConfiguratorEngine: ObservableObject {
         devicePollTimer?.invalidate()
     }
 
+    private var pollCycle: Int = 0
+
     public func startDevicePolling() {
         DispatchQueue.main.async {
             self.devicePollTimer?.invalidate()
             self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-                self?.refreshDevices()
-                // NOTE: checkAllPermissions() is NOT called here intentionally.
-                // NSAppleScript running every 2s blocks the main thread and
-                // causes macOS to repeatedly re-prompt / re-deny Automation permission.
-                // Permissions are checked once on startup and on user request only.
+                guard let self = self else { return }
+                self.refreshDevices()
+                self.pollCycle += 1
+                if self.pollCycle % 2 == 0 {
+                    self.refreshAppleIdStatus()
+                }
             }
         }
     }
@@ -364,41 +367,179 @@ public class ConfiguratorEngine: ObservableObject {
         }
     }
 
-    public static func mapMarketingName(_ identifier: String) -> String {
+    public static func mapMarketingName(_ identifier: String, modelNumber: String = "") -> String {
         let id = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mNum = modelNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
         let map: [String: String] = [
-            "iPhone18,2": "iPhone 16 Pro Max",
-            "iPhone18,1": "iPhone 16 Pro",
-            "iPhone17,4": "iPhone 16 Plus",
+            // iPhone 17 Series (2025/2026)
+            "iPhone18,1": "iPhone 17 Pro",
+            "iPhone18,2": "iPhone 17 Pro Max",
+            "iPhone18,3": "iPhone Air",
+            "iPhone18,4": "iPhone 17",
+            "iPhone18,5": "iPhone 17 Plus",
+
+            // iPhone 16 Series (2024)
+            "iPhone17,1": "iPhone 16 Pro",
+            "iPhone17,2": "iPhone 16 Pro Max",
             "iPhone17,3": "iPhone 16",
-            "iPhone16,2": "iPhone 15 Pro Max",
+            "iPhone17,4": "iPhone 16 Plus",
+            "iPhone17,5": "iPhone 16e",
+
+            // iPhone 15 Series (2023)
             "iPhone16,1": "iPhone 15 Pro",
-            "iPhone15,5": "iPhone 15 Plus",
+            "iPhone16,2": "iPhone 15 Pro Max",
             "iPhone15,4": "iPhone 15",
-            "iPhone15,3": "iPhone 14 Pro Max",
+            "iPhone15,5": "iPhone 15 Plus",
+
+            // iPhone 14 Series (2022)
             "iPhone15,2": "iPhone 14 Pro",
-            "iPhone14,8": "iPhone 14 Plus",
+            "iPhone15,3": "iPhone 14 Pro Max",
             "iPhone14,7": "iPhone 14",
-            "iPhone14,5": "iPhone 13",
-            "iPhone14,4": "iPhone 13 mini",
+            "iPhone14,8": "iPhone 14 Plus",
+
+            // iPhone 13 Series (2021)
             "iPhone14,2": "iPhone 13 Pro",
             "iPhone14,3": "iPhone 13 Pro Max",
-            "iPhone13,4": "iPhone 12 Pro Max",
-            "iPhone13,3": "iPhone 12 Pro",
-            "iPhone13,2": "iPhone 12",
+            "iPhone14,4": "iPhone 13 mini",
+            "iPhone14,5": "iPhone 13",
+
+            // iPhone 12 Series (2020)
             "iPhone13,1": "iPhone 12 mini",
-            "iPhone12,8": "iPhone SE (2nd gen)",
-            "iPhone14,6": "iPhone SE (3rd gen)",
-            "iPhone12,5": "iPhone 11 Pro Max",
-            "iPhone12,3": "iPhone 11 Pro",
+            "iPhone13,2": "iPhone 12",
+            "iPhone13,3": "iPhone 12 Pro",
+            "iPhone13,4": "iPhone 12 Pro Max",
+
+            // iPhone SE
+            "iPhone8,4": "iPhone SE (1-го поколения)",
+            "iPhone12,8": "iPhone SE (2-го поколения)",
+            "iPhone14,6": "iPhone SE (3-го поколения)",
+
+            // iPhone 11 Series (2019)
             "iPhone12,1": "iPhone 11",
+            "iPhone12,3": "iPhone 11 Pro",
+            "iPhone12,5": "iPhone 11 Pro Max",
+
+            // iPhone X, XS, XR, 8, 7, 6s, 6
             "iPhone11,8": "iPhone XR",
-            "iPhone11,6": "iPhone XS Max",
             "iPhone11,2": "iPhone XS",
+            "iPhone11,4": "iPhone XS Max",
+            "iPhone11,6": "iPhone XS Max",
+            "iPhone10,3": "iPhone X",
             "iPhone10,6": "iPhone X",
-            "iPhone10,3": "iPhone X"
+            "iPhone10,1": "iPhone 8",
+            "iPhone10,4": "iPhone 8",
+            "iPhone10,2": "iPhone 8 Plus",
+            "iPhone10,5": "iPhone 8 Plus",
+            "iPhone9,1": "iPhone 7",
+            "iPhone9,3": "iPhone 7",
+            "iPhone9,2": "iPhone 7 Plus",
+            "iPhone9,4": "iPhone 7 Plus",
+            "iPhone8,1": "iPhone 6s",
+            "iPhone8,2": "iPhone 6s Plus",
+            "iPhone7,2": "iPhone 6",
+            "iPhone7,1": "iPhone 6 Plus",
+            "iPhone6,1": "iPhone 5s",
+            "iPhone6,2": "iPhone 5s",
+            "iPhone5,3": "iPhone 5c",
+            "iPhone5,4": "iPhone 5c",
+            "iPhone5,1": "iPhone 5",
+            "iPhone5,2": "iPhone 5",
+
+            // iPad Pro
+            "iPad16,3": "iPad Pro 11″ (M4)",
+            "iPad16,4": "iPad Pro 11″ (M4)",
+            "iPad16,5": "iPad Pro 13″ (M4)",
+            "iPad16,6": "iPad Pro 13″ (M4)",
+            "iPad14,3": "iPad Pro 11″ (4-го пок. M2)",
+            "iPad14,4": "iPad Pro 11″ (4-го пок. M2)",
+            "iPad14,5": "iPad Pro 12.9″ (6-го пок. M2)",
+            "iPad14,6": "iPad Pro 12.9″ (6-го пок. M2)",
+            "iPad13,4": "iPad Pro 11″ (3-го пок. M1)",
+            "iPad13,5": "iPad Pro 11″ (3-го пок. M1)",
+            "iPad13,6": "iPad Pro 11″ (3-го пок. M1)",
+            "iPad13,7": "iPad Pro 11″ (3-го пок. M1)",
+            "iPad13,8": "iPad Pro 12.9″ (5-го пок. M1)",
+            "iPad13,9": "iPad Pro 12.9″ (5-го пок. M1)",
+            "iPad13,10": "iPad Pro 12.9″ (5-го пок. M1)",
+            "iPad13,11": "iPad Pro 12.9″ (5-го пок. M1)",
+            "iPad8,1": "iPad Pro 11″ (1-го пок.)",
+            "iPad8,2": "iPad Pro 11″ (1-го пок.)",
+            "iPad8,3": "iPad Pro 11″ (1-го пок.)",
+            "iPad8,4": "iPad Pro 11″ (1-го пок.)",
+            "iPad8,5": "iPad Pro 12.9″ (3-го пок.)",
+            "iPad8,6": "iPad Pro 12.9″ (3-го пок.)",
+            "iPad8,7": "iPad Pro 12.9″ (3-го пок.)",
+            "iPad8,8": "iPad Pro 12.9″ (3-го пок.)",
+            "iPad8,9": "iPad Pro 11″ (2-го пок.)",
+            "iPad8,10": "iPad Pro 11″ (2-го пок.)",
+            "iPad8,11": "iPad Pro 12.9″ (4-го пок.)",
+            "iPad8,12": "iPad Pro 12.9″ (4-го пок.)",
+
+            // iPad Air
+            "iPad14,8": "iPad Air 11″ (M2)",
+            "iPad14,9": "iPad Air 11″ (M2)",
+            "iPad14,10": "iPad Air 13″ (M2)",
+            "iPad14,11": "iPad Air 13″ (M2)",
+            "iPad13,16": "iPad Air (5-го пок. M1)",
+            "iPad13,17": "iPad Air (5-го пок. M1)",
+            "iPad13,1": "iPad Air (4-го пок.)",
+            "iPad13,2": "iPad Air (4-го пок.)",
+            "iPad11,3": "iPad Air (3-го пок.)",
+            "iPad11,4": "iPad Air (3-го пок.)",
+
+            // iPad mini
+            "iPad16,1": "iPad mini (A17 Pro)",
+            "iPad16,2": "iPad mini (A17 Pro)",
+            "iPad14,1": "iPad mini (6-го пок.)",
+            "iPad14,2": "iPad mini (6-го пок.)",
+            "iPad11,1": "iPad mini (5-го пок.)",
+            "iPad11,2": "iPad mini (5-го пок.)",
+
+            // iPad (Базовый)
+            "iPad13,18": "iPad (10-го пок.)",
+            "iPad13,19": "iPad (10-го пок.)",
+            "iPad12,1": "iPad (9-го пок.)",
+            "iPad12,2": "iPad (9-го пок.)",
+            "iPad11,6": "iPad (8-го пок.)",
+            "iPad11,7": "iPad (8-го пок.)",
+            "iPad7,11": "iPad (7-го пок.)",
+            "iPad7,12": "iPad (7-го пок.)"
         ]
-        return map[id] ?? id
+
+        if let name = map[id] { return name }
+
+        let modelMap: [String: String] = [
+            "A3296": "iPhone 16 Pro Max", "A3297": "iPhone 16 Pro Max", "A3295": "iPhone 16 Pro Max", "A3084": "iPhone 16 Pro Max",
+            "A3293": "iPhone 16 Pro", "A3294": "iPhone 16 Pro", "A3292": "iPhone 16 Pro", "A3083": "iPhone 16 Pro",
+            "A3290": "iPhone 16 Plus", "A3291": "iPhone 16 Plus", "A3289": "iPhone 16 Plus", "A3082": "iPhone 16 Plus",
+            "A3287": "iPhone 16", "A3288": "iPhone 16", "A3286": "iPhone 16", "A3081": "iPhone 16",
+            "A3106": "iPhone 15 Pro Max", "A3108": "iPhone 15 Pro Max", "A2849": "iPhone 15 Pro Max", "A3105": "iPhone 15 Pro Max",
+            "A3102": "iPhone 15 Pro", "A3104": "iPhone 15 Pro", "A2848": "iPhone 15 Pro", "A3101": "iPhone 15 Pro",
+            "A3094": "iPhone 15 Plus", "A3096": "iPhone 15 Plus", "A2847": "iPhone 15 Plus", "A3093": "iPhone 15 Plus",
+            "A3090": "iPhone 15", "A3092": "iPhone 15", "A2846": "iPhone 15", "A3089": "iPhone 15",
+            "A2894": "iPhone 14 Pro Max", "A2896": "iPhone 14 Pro Max", "A2651": "iPhone 14 Pro Max",
+            "A2890": "iPhone 14 Pro", "A2892": "iPhone 14 Pro", "A2650": "iPhone 14 Pro",
+            "A2886": "iPhone 14 Plus", "A2888": "iPhone 14 Plus", "A2632": "iPhone 14 Plus",
+            "A2882": "iPhone 14", "A2884": "iPhone 14", "A2649": "iPhone 14",
+            "A2643": "iPhone 13 Pro Max", "A2644": "iPhone 13 Pro Max", "A2484": "iPhone 13 Pro Max",
+            "A2638": "iPhone 13 Pro", "A2639": "iPhone 13 Pro", "A2483": "iPhone 13 Pro",
+            "A2633": "iPhone 13", "A2634": "iPhone 13", "A2482": "iPhone 13",
+            "A2628": "iPhone 13 mini", "A2629": "iPhone 13 mini", "A2481": "iPhone 13 mini",
+            "A2411": "iPhone 12 Pro Max", "A2412": "iPhone 12 Pro Max", "A2342": "iPhone 12 Pro Max",
+            "A2407": "iPhone 12 Pro", "A2408": "iPhone 12 Pro", "A2341": "iPhone 12 Pro",
+            "A2403": "iPhone 12", "A2404": "iPhone 12", "A2172": "iPhone 12",
+            "A2399": "iPhone 12 mini", "A2400": "iPhone 12 mini", "A2176": "iPhone 12 mini",
+            "A2218": "iPhone 11 Pro Max", "A2220": "iPhone 11 Pro Max", "A2161": "iPhone 11 Pro Max",
+            "A2215": "iPhone 11 Pro", "A2217": "iPhone 11 Pro", "A2160": "iPhone 11 Pro",
+            "A2221": "iPhone 11", "A2223": "iPhone 11", "A2111": "iPhone 11",
+            "A2783": "iPhone SE (3-го пок.)", "A2784": "iPhone SE (3-го пок.)", "A2595": "iPhone SE (3-го пок.)",
+            "A2275": "iPhone SE (2-го пок.)", "A2296": "iPhone SE (2-го пок.)", "A2298": "iPhone SE (2-го пок.)"
+        ]
+
+        if !mNum.isEmpty, let mName = modelMap[mNum] { return mName }
+
+        return id.isEmpty ? "iPhone" : id
     }
 
     public func getConnectedDevicesDetails() -> [DeviceInfo] {
@@ -430,7 +571,9 @@ public class ConfiguratorEngine: ObservableObject {
         let name = (dict["DeviceName"] as? String) ?? "iPhone"
         let productVersion = (dict["ProductVersion"] as? String) ?? ""
         let udid = (dict["UniqueDeviceID"] as? String) ?? ""
-        let marketingName = Self.mapMarketingName(productType)
+        let modelNum = (dict["RegulatoryModelNumber"] as? String) ?? (dict["ModelNumber"] as? String) ?? ""
+        let givenMarketing = (dict["MarketingName"] as? String) ?? ""
+        let marketingName = !givenMarketing.isEmpty ? givenMarketing : Self.mapMarketingName(productType, modelNumber: modelNum)
 
         // Format disk capacity
         var diskStr = ""
@@ -1706,36 +1849,74 @@ public class ConfiguratorEngine: ObservableObject {
     }
 
     public func refreshAppleIdStatus() {
-        let coreScript = Self.workDir + "/ios_core.py"
-        guard FileManager.default.fileExists(atPath: coreScript) else { return }
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: coreScript)
-            proc.arguments = ["auth_info"]
-            let pipe = Pipe()
-            proc.standardOutput = pipe
-            proc.standardError = Pipe()
 
-            guard (try? proc.run()) != nil else { return }
-            proc.waitUntilExit()
+            // 1. Try reading live signed in account from Apple Configurator UI menu
+            let scriptSource = """
+            tell application "System Events"
+                if exists (process "Apple Configurator") then
+                    tell process "Apple Configurator"
+                        try
+                            tell menu bar 1
+                                repeat with mi in menu bar items
+                                    if (name of mi is "Учетная запись" or name of mi is "Account") then
+                                        set firstItem to name of menu item 1 of menu 1 of mi
+                                        if firstItem does not contain "Sign In" and firstItem does not contain "Войти" and firstItem is not "missing value" and firstItem is not "" then
+                                            return "AUTH:" & firstItem
+                                        else
+                                            return "UNAUTH"
+                                        end if
+                                    end if
+                                end repeat
+                            end tell
+                        end try
+                    end tell
+                end if
+                return "UNKNOWN"
+            end tell
+            """
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let auth = dict["authenticated"] as? Bool {
-                let name = (dict["name"] as? String) ?? ""
-                let email = (dict["email"] as? String) ?? ""
-                DispatchQueue.main.async {
-                    self.isAppleIdAuthenticated = auth
-                    self.activeAppleIdName = name
-                    self.activeAppleIdEmail = email
+            var liveEmail: String? = nil
+            var isLiveAuth: Bool? = nil
+
+            var errInfo: NSDictionary?
+            if let appleScript = NSAppleScript(source: scriptSource) {
+                let desc = appleScript.executeAndReturnError(&errInfo)
+                let str = desc.stringValue ?? ""
+                if str.hasPrefix("AUTH:") {
+                    liveEmail = String(str.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    isLiveAuth = true
+                } else if str == "UNAUTH" {
+                    isLiveAuth = false
                 }
-            } else {
-                DispatchQueue.main.async {
+            }
+
+            // 2. Also check ownerDsid from store.sqlite
+            let dsid = self.getOwnerDsid() ?? ""
+
+            DispatchQueue.main.async {
+                let prevEmail = self.activeAppleIdEmail
+                if let email = liveEmail, !email.isEmpty {
+                    self.activeAppleIdEmail = email
+                    self.activeAppleIdName = email.components(separatedBy: "@").first ?? email
+                    self.isAppleIdAuthenticated = true
+                    self.currentAccountDsid = dsid
+                    if prevEmail != email {
+                        LogManager.shared.log("✅ Обнаружен новый Apple ID в Apple Configurator: \(email)", level: "AUTH")
+                        self.refreshPurchasedApps()
+                    }
+                } else if isLiveAuth == false {
                     self.isAppleIdAuthenticated = false
-                    self.activeAppleIdName = ""
                     self.activeAppleIdEmail = ""
+                    self.activeAppleIdName = ""
+                } else if !dsid.isEmpty {
+                    self.currentAccountDsid = dsid
+                    if self.activeAppleIdEmail.isEmpty {
+                        self.activeAppleIdEmail = "Apple ID (DSID: \(dsid))"
+                        self.activeAppleIdName = "Пользователь"
+                        self.isAppleIdAuthenticated = true
+                    }
                 }
             }
         }
