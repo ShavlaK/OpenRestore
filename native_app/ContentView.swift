@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import AppKit
 
 // MARK: - Models
@@ -11,6 +12,7 @@ struct SavedIPA: Identifiable, Hashable {
     let size: String
     let date: String
     let adamId: String
+    var artworkUrl: String? = nil
 }
 
 // MARK: - App Logo View (Blue gradient rounded squircle with white lightning bolt)
@@ -46,6 +48,41 @@ extension View {
             self.buttonBorderShape(.capsule)
         } else {
             self.buttonBorderShape(.roundedRectangle)
+        }
+    }
+}
+
+// MARK: - Engine Mode Enum
+public enum InstallEngineMode: String, CaseIterable, Identifiable {
+    case direct = "direct"
+    case configurator = "configurator"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .direct:
+            return "Прямой нативный (go-ios + ipatool)"
+        case .configurator:
+            return "Apple Configurator"
+        }
+    }
+
+    public var shortTitle: String {
+        switch self {
+        case .direct:
+            return "Прямой нативный"
+        case .configurator:
+            return "Configurator"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .direct:
+            return "bolt.fill"
+        case .configurator:
+            return "gearshape.2.fill"
         }
     }
 }
@@ -92,7 +129,7 @@ struct VisualEffectBlur: NSViewRepresentable {
 
 // MARK: - Main ContentView
 struct ContentView: View {
-    @StateObject private var engine = ConfiguratorEngine.shared
+    @ObservedObject private var engine = ConfiguratorEngine.shared
     @State private var catalogApps: [AppItem] = []
     @State private var searchQuery: String = ""
     @State private var customAdamId: String = ""
@@ -103,9 +140,14 @@ struct ContentView: View {
     @AppStorage("appColorScheme")          private var storedScheme: String = "system"
     @AppStorage("libraryPath")             private var customLibraryPath: String = ""
     @AppStorage("selectedSidebarTab")      private var storedSidebarTab: String = SidebarItem.device.rawValue
+    @AppStorage("installEngineMode")       private var installEngineMode: String = InstallEngineMode.direct.rawValue
     @AppStorage("preferDirectMode")        private var preferDirectMode: Bool = true
     @AppStorage("autoClickConfigurator")   private var autoClickConfigurator: Bool = true
     @AppStorage("autoCheckUpdates")        private var autoCheckUpdates: Bool = true
+
+    var currentEngineMode: InstallEngineMode {
+        InstallEngineMode(rawValue: installEngineMode) ?? .direct
+    }
 
     var selectedSidebar: SidebarItem {
         SidebarItem(rawValue: storedSidebarTab) ?? .device
@@ -119,7 +161,6 @@ struct ContentView: View {
 
     @State private var appToDeleteIPA: (name: String, path: String)? = nil
     @State private var showDeleteIPAConfirm: Bool = false
-    @State private var showDeviceInfoSheet: Bool = false
     @State private var showDeviceManagerSheet: Bool = false
     @State private var selectedDeviceForDetail: DeviceInfo? = nil
     @State private var editingOwnerName: String = ""
@@ -127,6 +168,14 @@ struct ContentView: View {
     @State private var showForgetConfirmDialog: Bool = false
     @State private var deviceToForget: DeviceInfo? = nil
     @State private var showAppleIdSheet: Bool = false
+    @State private var appleIdEmailInput: String = ""
+    @State private var appleIdPasswordInput: String = ""
+    @State private var appleId2FACodeInput: String = ""
+    @State private var is2FARequired: Bool = false
+    @State private var isLoggingInAppleId: Bool = false
+    @State private var appleIdAuthError: String = ""
+    @State private var appleIdAuthSuccess: String = ""
+    @State private var isPasswordVisible: Bool = false
 
     @State private var selectedSavedIPAPaths: Set<String> = []
     @State private var savedIPASearchQuery: String = ""
@@ -191,12 +240,19 @@ struct ContentView: View {
 
     func isSavedInLibrary(adamId: Int64, name: String = "", bundleId: String = "") -> SavedIPA? {
         let aidStr = String(adamId)
-        return savedIPAs.first(where: { item in
+        guard let item = savedIPAs.first(where: { item in
             if aidStr != "0" && !aidStr.isEmpty && (item.adamId == aidStr || item.filename.contains(aidStr)) { return true }
             if !name.isEmpty && item.displayName.lowercased().contains(name.lowercased()) { return true }
             if !bundleId.isEmpty && item.filename.lowercased().contains(bundleId.lowercased()) { return true }
             return false
-        })
+        }) else { return nil }
+
+        // Validate that the IPA is not a 0-byte/22-byte broken artifact
+        if let attr = try? FileManager.default.attributesOfItem(atPath: item.path),
+           let sz = attr[.size] as? Int64, sz > 1_000_000 {
+            return item
+        }
+        return nil
     }
 
     // MARK: - Main Body
@@ -228,8 +284,6 @@ struct ContentView: View {
         .frame(minWidth: 940, minHeight: 620)
         .preferredColorScheme(preferredScheme)
         .onAppear {
-            engine.checkAllPermissions()
-            engine.refreshAppleIdStatus()
             loadCatalog()
             loadSavedIPAs()
             engine.refreshDevices()
@@ -239,8 +293,7 @@ struct ContentView: View {
         .sheet(isPresented: $isRestoring)              { restoreProgressSheet }
         .sheet(isPresented: $showManualAdamIdDialog)    { manualAdamIdSheet }
         .sheet(isPresented: $showDeviceManagerSheet)    { deviceManagerSheet }
-        .sheet(isPresented: $showDeviceInfoSheet)       { deviceManagerSheet }
-        .sheet(isPresented: $showAppleIdSheet)          { appleIdSheet }
+                .sheet(isPresented: $showAppleIdSheet)          { appleIdSheet }
         .alert(isPresented: $showAlert) {
             Alert(title: Text("OpenRestore"), message: Text(alertMessage ?? ""),
                   dismissButton: .default(Text("OK")))
@@ -303,40 +356,44 @@ struct ContentView: View {
             VStack(spacing: 8) {
                 // Apple ID Button Card
                 Button(action: {
-                    showAppleIdSheet = true
+                    if currentEngineMode == .configurator {
+                        engine.openConfigurator()
+                    } else {
+                        showAppleIdSheet = true
+                    }
                 }) {
                     HStack(spacing: 8) {
                         ZStack {
                             Circle()
-                                .fill(engine.isAppleIdAuthenticated ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12))
+                                .fill((currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) || (currentEngineMode == .direct && engine.isAppleIdAuthenticated) ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12))
                                 .frame(width: 28, height: 28)
-                            Image(systemName: engine.isAppleIdAuthenticated ? "person.crop.circle.fill" : "person.crop.circle")
+                            Image(systemName: engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? "person.crop.circle.fill" : "person.crop.circle")
                                 .font(.system(size: 16))
-                                .foregroundColor(engine.isAppleIdAuthenticated ? .blue : .secondary)
+                                .foregroundColor(engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? .blue : .secondary)
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(engine.activeAppleIdEmail.isEmpty ? "Apple ID — Войти" : engine.activeAppleIdEmail)
+                            Text(currentEngineMode == .configurator ? "Apple Configurator Auth" : (engine.activeAppleIdEmail.isEmpty ? "Apple ID — Войти" : engine.activeAppleIdEmail))
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(.primary)
                                 .lineLimit(1)
-                            Text(engine.currentAccountDsid.isEmpty ? "Нажмите для настроек" : "\(engine.purchasedApps.count) покупок • FairPlay")
+                            Text(currentEngineMode == .configurator ? (!engine.currentAccountDsid.isEmpty ? "\(engine.purchasedApps.count) покупок • Configurator" : "Нажмите, чтобы открыть") : (engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."))" : (engine.isAppleIdAuthenticated && engine.purchasedApps.isEmpty ? "Загрузка покупок..." : (engine.currentAccountDsid.isEmpty && !engine.isAppleIdAuthenticated ? "Нажмите для настроек" : "\(engine.purchasedApps.count) покупок • FairPlay"))))
                                 .font(.system(size: 9))
                                 .foregroundColor(.secondary)
                         }
 
                         Spacer()
 
-                        Circle()
-                            .fill(engine.isAppleIdAuthenticated ? Color.green : Color.orange)
-                            .frame(width: 6, height: 6)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.secondary)
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.vertical, 8)
+                    .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -463,22 +520,35 @@ struct ContentView: View {
                 .frame(height: 1)
                 .padding(.horizontal, 14)
 
-            HStack(spacing: 8) {
-                Image(systemName: preferDirectMode ? "bolt.fill" : "app.badge")
-                    .font(.system(size: 11))
-                    .foregroundColor(preferDirectMode ? .blue : .orange)
-                    .frame(width: 16)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Image(systemName: currentEngineMode == .direct ? "bolt.fill" : "gearshape.2.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(currentEngineMode == .direct ? .blue : .orange)
+                        .frame(width: 16)
 
-                Text(preferDirectMode ? "Прямой режим (USB)" : "Apple Configurator")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.secondary)
+                    Text(currentEngineMode == .direct ? "Прямой нативный (go-ios)" : "Apple Configurator")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.primary)
 
-                Spacer()
+                    Spacer()
 
-                Toggle("", isOn: $preferDirectMode)
+                    Toggle("", isOn: Binding(
+                        get: { currentEngineMode == .direct },
+                        set: { isDirect in
+                            installEngineMode = isDirect ? InstallEngineMode.direct.rawValue : InstallEngineMode.configurator.rawValue
+                            preferDirectMode = isDirect
+                        }
+                    ))
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
+                }
+
+                Text(currentEngineMode == .direct ? "Быстрая установка без Configurator" : "Резервный режим через GUI")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -549,10 +619,6 @@ struct ContentView: View {
     @ViewBuilder
     private var detailContentView: some View {
         VStack(spacing: 0) {
-            if !engine.isAccessibilityGranted {
-                accessibilityBanner
-            }
-
             switch selectedSidebar {
             case .device:    oldDeviceAppsView
             case .purchases: purchasedAppsView
@@ -561,52 +627,6 @@ struct ContentView: View {
             case .settings:  settingsView
             }
         }
-    }
-
-    private var accessibilityBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "hand.raised.fill")
-                .foregroundColor(.orange)
-                .font(.system(size: 13, weight: .bold))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Требуется разрешение «Универсальный доступ»")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.primary)
-                Text("Для автоматических кликов в Apple Configurator разрешите OpenRestore в Системных настройках.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Button("Разрешить доступ") {
-                engine.requestAccessibilityPrompt()
-                engine.openAccessibilitySettings()
-            }
-            .buttonStyle(.borderedProminent)
-            .roundedCapsuleButton()
-            .tint(.orange)
-            .controlSize(.small)
-
-            Button(action: {
-                engine.checkAllPermissions()
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11))
-            }
-            .buttonStyle(.plain)
-            .help("Проверить снова")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12))
-        .overlay(
-            Rectangle()
-                .fill(Color.orange.opacity(0.3))
-                .frame(height: 1),
-            alignment: .bottom
-        )
     }
 
     // MARK: - Glass Toolbar Helper
@@ -922,7 +942,7 @@ struct ContentView: View {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
                             .font(.system(size: 12))
-                        TextField("Поиск среди \(engine.purchasedApps.count) покупок в Apple ID...", text: $searchQuery)
+                        TextField("Поиск среди \(engine.totalPurchasedAppsCount > 0 ? engine.totalPurchasedAppsCount : engine.purchasedApps.count) покупок в Apple ID...", text: $searchQuery)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
                         if !searchQuery.isEmpty {
@@ -946,19 +966,27 @@ struct ContentView: View {
                         engine.refreshPurchasedApps()
                         engine.refreshAppleIdStatus()
                     }) {
-                        Label("Синхронизировать", systemImage: "arrow.clockwise")
+                        HStack(spacing: 4) {
+                            if engine.isLoadingPurchasedApps {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .scaleEffect(0.7)
+                            }
+                            Label(engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."))" : "Синхронизировать", systemImage: "arrow.clockwise")
+                        }
                     }
                     .buttonStyle(.bordered)
                     .roundedCapsuleButton()
                     .controlSize(.small)
+                    .disabled(engine.isLoadingPurchasedApps)
                 }
             }
 
             if engine.purchasedApps.isEmpty {
                 emptyStateView(
                     icon: "bag",
-                    title: "Покупки не найдены",
-                    subtitle: "Нажмите на Apple ID в боковой панели, чтобы войти в аккаунт через Apple Configurator."
+                    title: engine.isLoadingPurchasedApps ? "Синхронизация покупок..." : "Покупки не найдены",
+                    subtitle: engine.isLoadingPurchasedApps ? "Загружаем полный список ваших приложений из Apple ID..." : "Нажмите на Apple ID в боковой панели, чтобы войти в аккаунт и синхронизировать приложения."
                 )
             } else {
                 List(filteredPurchasedApps) { item in
@@ -1285,14 +1313,8 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.green.opacity(0.15))
-                    .frame(width: 32, height: 32)
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 15))
-                    .foregroundColor(.green)
-            }
+            // App Icon
+            appIconView(url: item.artworkUrl, name: item.displayName)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -1454,28 +1476,118 @@ struct ContentView: View {
                     }
                 }
 
-                // Section 3: Download Engines
-                settingsCard(title: "Алгоритмы восстановления", icon: "bolt.fill", iconColor: .blue) {
+                // Section 3: Engine Mode
+                settingsCard(title: "Движок установки и восстановления", icon: "bolt.fill", iconColor: .blue) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Toggle(isOn: $preferDirectMode) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Прямой USB и App Store режим (iMazing)")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Прямое скачивание и установка за 2 секунды без вызова Apple Configurator.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                        Text("Выберите основной метод работы приложения:")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+
+                        // Option 1: Direct Standalone (Default & Recommended)
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                installEngineMode = InstallEngineMode.direct.rawValue
+                                preferDirectMode = true
                             }
+                        }) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: currentEngineMode == .direct ? "largecircle.fill.circle" : "circle")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(currentEngineMode == .direct ? .blue : .secondary)
+                                    .padding(.top, 2)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Text("⚡ Прямой нативный режим (go-ios + ipatool)")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.primary)
+
+                                        Text("По умолчанию")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Capsule().fill(Color.blue))
+                                    }
+
+                                    Text("Молниеносная установка за 2–3 секунды в фоновом режиме через системный сервис installation_proxy iOS. Не требует запуска Apple Configurator, AppleScript и разрешений системы.")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(currentEngineMode == .direct ? Color.blue.opacity(0.08) : Color.primary.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(currentEngineMode == .direct ? Color.blue.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1.5)
+                            )
                         }
+                        .buttonStyle(.plain)
 
-                        Divider()
+                        // Option 2: Apple Configurator (Legacy / Fallback)
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                installEngineMode = InstallEngineMode.configurator.rawValue
+                                preferDirectMode = false
+                            }
+                        }) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: currentEngineMode == .configurator ? "largecircle.fill.circle" : "circle")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(currentEngineMode == .configurator ? .orange : .secondary)
+                                    .padding(.top, 2)
 
-                        Toggle(isOn: $autoClickConfigurator) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Автоматизация Apple Configurator")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Автоматически инициирует загрузку при переключении на резервный метод.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Text("⚙️ Apple Configurator (Резервный режим)")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.primary)
+
+                                        Text("Резерв")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Capsule().fill(Color.orange))
+                                    }
+
+                                    Text("Классический режим через графический интерфейс Apple Configurator и базу данных CoreData. Включается только при необходимости.")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(currentEngineMode == .configurator ? Color.orange.opacity(0.08) : Color.primary.opacity(0.03))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(currentEngineMode == .configurator ? Color.orange.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1.5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if currentEngineMode == .configurator {
+                            Divider().padding(.vertical, 4)
+
+                            Toggle(isOn: $autoClickConfigurator) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Автоматизация кликов в Apple Configurator")
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("Автоматически нажимает кнопку «Добавить» и закрывает диалоги замены.")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
@@ -1585,7 +1697,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Текущая версия: OpenRestore v1.5.0")
+                                Text("Текущая версия: OpenRestore v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0")")
                                     .font(.system(size: 12, weight: .semibold))
                                 Text("Сборка Universal 2 для macOS (Apple Silicon & Intel)")
                                     .font(.system(size: 11))
@@ -1725,6 +1837,343 @@ struct ContentView: View {
         )
     }
 
+    // MARK: - Apple ID Sheet
+    private var appleIdSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Учётная запись Apple ID")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                Spacer()
+                Button("Закрыть") {
+                    showAppleIdSheet = false
+                    appleIdAuthError = ""
+                    appleIdAuthSuccess = ""
+                    is2FARequired = false
+                    appleIdPasswordInput = ""
+                    appleId2FACodeInput = ""
+                    isPasswordVisible = false
+                }
+                .buttonStyle(.bordered)
+                .roundedCapsuleButton()
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(.ultraThinMaterial)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 16) {
+                if engine.isDirectAppleIdAuthenticated && !engine.activeAppleIdEmail.isEmpty {
+                    // Authenticated Card
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 46, height: 46)
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundColor(.white)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Text(engine.activeAppleIdName.isEmpty ? "Пользователь Apple ID" : engine.activeAppleIdName)
+                                    .font(.system(size: 15, weight: .bold))
+
+                                HStack(spacing: 4) {
+                                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                                    Text("Аккаунт авторизован")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.green)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2.5)
+                                .background(Color.green.opacity(0.12))
+                                .clipShape(Capsule())
+                            }
+
+                            Text(engine.activeAppleIdEmail)
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+
+                            HStack(spacing: 6) {
+                                if !engine.currentAccountDsid.isEmpty {
+                                    Text("DSID: \(engine.currentAccountDsid)")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                    Text("•").foregroundColor(.secondary)
+                                }
+                                Text("Покупок в базе: \(engine.purchasedApps.count)")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+
+                    HStack(spacing: 10) {
+                        Button(action: {
+                            engine.refreshPurchasedApps()
+                            engine.refreshAppleIdStatus()
+                        }) {
+                            Label("Синхронизировать покупки", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
+
+                        Spacer()
+
+                        Button(role: .destructive, action: {
+                            Task {
+                                _ = await engine.logoutAppleId()
+                            }
+                        }) {
+                            Label("Сменить аккаунт / Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                        .buttonStyle(.bordered)
+                        .roundedCapsuleButton()
+                        .tint(.red)
+                    }
+                } else {
+                    // Login Form
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "applelogo")
+                                .font(.system(size: 20))
+                                .foregroundColor(.primary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Вход в Apple ID")
+                                    .font(.system(size: 14, weight: .bold))
+                                Text("Для прямой загрузки и лицензирования приложений из App Store")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        VStack(spacing: 10) {
+                            TextField("Apple ID (email@example.com)", text: $appleIdEmailInput)
+                                .textFieldStyle(.roundedBorder)
+                                .disableAutocorrection(true)
+
+                            // Password with Eye preview toggle
+                            HStack {
+                                if isPasswordVisible {
+                                    TextField("Пароль Apple ID", text: $appleIdPasswordInput)
+                                        .textFieldStyle(.plain)
+                                } else {
+                                    SecureField("Пароль Apple ID", text: $appleIdPasswordInput)
+                                        .textFieldStyle(.plain)
+                                }
+                                Button(action: { isPasswordVisible.toggle() }) {
+                                    Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 12))
+                                }
+                                .buttonStyle(.plain)
+                                .help(isPasswordVisible ? "Скрыть пароль" : "Показать пароль")
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                            )
+
+                            if is2FARequired {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Image(systemName: "key.fill")
+                                            .foregroundColor(.blue)
+                                            .font(.system(size: 13))
+                                        Text("Проверочный код (2FA):")
+                                            .font(.system(size: 12, weight: .bold))
+                                        Spacer()
+                                        Button(action: {
+                                            appleId2FACodeInput = ""
+                                            isLoggingInAppleId = true
+                                            appleIdAuthError = ""
+                                            Task {
+                                                let (ok, req2fa, msg) = await engine.loginAppleId(
+                                                    email: appleIdEmailInput,
+                                                    password: appleIdPasswordInput,
+                                                    code: nil
+                                                )
+                                                DispatchQueue.main.async {
+                                                    self.isLoggingInAppleId = false
+                                                    if ok {
+                                                        self.appleIdAuthSuccess = "Вход успешно выполнен!"
+                                                        self.is2FARequired = false
+                                                        self.appleIdPasswordInput = ""
+                                                        self.appleId2FACodeInput = ""
+                                                        self.engine.refreshAppleIdStatus()
+                                                        self.engine.refreshPurchasedApps()
+                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                                            self.showAppleIdSheet = false
+                                                        }
+                                                    } else {
+                                                        self.is2FARequired = req2fa
+                                                        self.appleIdAuthError = msg
+                                                    }
+                                                }
+                                            }
+                                        }) {
+                                            Label("Запросить новый код", systemImage: "arrow.clockwise")
+                                                .font(.system(size: 10, weight: .medium))
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .foregroundColor(.blue)
+                                        .disabled(isLoggingInAppleId)
+                                    }
+
+                                    TextField("Введите 6 цифр (например: 123456)", text: $appleId2FACodeInput)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+
+                                    Text("Нажмите «Разрешить» на всплывшем окне Apple и введите появившийся код.")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(10)
+                                .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                                )
+                            }
+                        }
+
+                        if !appleIdAuthError.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                    .font(.system(size: 11))
+                                Text(appleIdAuthError)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.red)
+                            }
+                            .padding(8)
+                            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+
+                        if !appleIdAuthSuccess.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                    .font(.system(size: 11))
+                                Text(appleIdAuthSuccess)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.green)
+                            }
+                            .padding(8)
+                            .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                guard !appleIdEmailInput.isEmpty, !appleIdPasswordInput.isEmpty else {
+                                    appleIdAuthError = "Введите email и пароль Apple ID"
+                                    return
+                                }
+                                if is2FARequired && appleId2FACodeInput.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    appleIdAuthError = "Введите 6-значный код 2FA"
+                                    return
+                                }
+                                isLoggingInAppleId = true
+                                appleIdAuthError = ""
+                                appleIdAuthSuccess = ""
+
+                                Task {
+                                    let (ok, req2fa, msg) = await engine.loginAppleId(
+                                        email: appleIdEmailInput,
+                                        password: appleIdPasswordInput,
+                                        code: is2FARequired ? appleId2FACodeInput : nil
+                                    )
+                                    DispatchQueue.main.async {
+                                        self.isLoggingInAppleId = false
+                                        if ok {
+                                            self.appleIdAuthSuccess = "Вход успешно выполнен!"
+                                            self.is2FARequired = false
+                                            self.appleIdPasswordInput = ""
+                                            self.appleId2FACodeInput = ""
+                                            self.engine.refreshAppleIdStatus()
+                                            self.engine.refreshPurchasedApps()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                                self.showAppleIdSheet = false
+                                            }
+                                        } else if req2fa {
+                                            self.is2FARequired = true
+                                            self.appleIdAuthError = msg
+                                        } else {
+                                            self.appleIdAuthError = msg
+                                        }
+                                    }
+                                }
+                            }) {
+                                HStack(spacing: 6) {
+                                    if isLoggingInAppleId {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text(is2FARequired ? "Подтвердить код (2FA)" : "Войти")
+                                        .font(.system(size: 12, weight: .bold))
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .roundedCapsuleButton()
+                            .tint(.blue)
+                            .disabled(isLoggingInAppleId || appleIdEmailInput.isEmpty || appleIdPasswordInput.isEmpty || (is2FARequired && appleId2FACodeInput.trimmingCharacters(in: .whitespaces).isEmpty))
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                }
+
+                // Security Note
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.blue)
+                    Text("Авторизация выполняется напрямую через защищенный протокол Apple Store. Ваши учетные данные шифруются по алгоритму AES-256 и сохраняются локально в изолированном файловом хранилище OpenRestore.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .padding(20)
+        }
+        .frame(width: 480)
+        .onAppear {
+            if appleIdEmailInput.isEmpty && !engine.activeAppleIdEmail.isEmpty && !engine.activeAppleIdEmail.contains("DSID") && !engine.isDirectAppleIdAuthenticated {
+                appleIdEmailInput = engine.activeAppleIdEmail
+            }
+        }
+        .onDisappear {
+            if !engine.isDirectAppleIdAuthenticated {
+                is2FARequired = false
+                appleIdPasswordInput = ""
+                appleId2FACodeInput = ""
+                appleIdAuthError = ""
+                appleIdAuthSuccess = ""
+                isPasswordVisible = false
+            }
+        }
+    }
+
     // MARK: - Shared Icon Helper
     private func appIconView(url: String?, name: String) -> some View {
         Group {
@@ -1775,151 +2224,6 @@ struct ContentView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Apple ID Sheet
-    private var appleIdSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Учётная запись Apple ID")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                Spacer()
-                Button("Закрыть") { showAppleIdSheet = false }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(.ultraThinMaterial)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 16) {
-                // Card
-                HStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 44, height: 44)
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(engine.activeAppleIdEmail.isEmpty ? "Apple ID не авторизован" : engine.activeAppleIdEmail)
-                                .font(.system(size: 14, weight: .bold))
-
-                            if !engine.currentAccountDsid.isEmpty {
-                                HStack(spacing: 3) {
-                                    Circle().fill(Color.green).frame(width: 5, height: 5)
-                                    Text("Активен")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(.green)
-                                }
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.green.opacity(0.12))
-                                .clipShape(Capsule())
-                            }
-                        }
-
-                        HStack(spacing: 6) {
-                            if !engine.currentAccountDsid.isEmpty {
-                                Text("DSID: \(engine.currentAccountDsid)")
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundColor(.secondary)
-                                Text("•").foregroundColor(.secondary)
-                            }
-                            Text("Покупок в базе: \(engine.purchasedApps.count)")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.blue)
-                        }
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.shield.fill")
-                            .foregroundColor(.green)
-                            .font(.system(size: 12))
-                        Text("Официальная привязка Apple Configurator")
-                            .font(.system(size: 11, weight: .bold))
-                    }
-                    Text("Все приложения скачиваются с официальной FairPlay DRM лицензией вашего Apple ID.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack(spacing: 10) {
-                    Button(action: { engine.openConfiguratorAccountDialog() }) {
-                        Label("Сменить Apple ID / Войти", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .roundedCapsuleButton()
-                    .tint(.blue)
-
-                    Button(action: {
-                        engine.refreshPurchasedApps()
-                        engine.refreshAppleIdStatus()
-                    }) {
-                        Label("Синхронизировать", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                }
-
-                // Step-by-step manual guide
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundColor(.blue)
-                            .font(.system(size: 13))
-                        Text("Инструкция по ручной смене Apple ID:")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.primary)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("1.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
-                            Text("В окне **Apple Configurator** в строке меню выберите **Учётная запись (Account)**.").font(.system(size: 10)).foregroundColor(.secondary)
-                        }
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("2.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
-                            Text("Нажмите **Выйти… (Sign Out)** (если уже выполнен вход), затем **Войти… (Sign In)**.").font(.system(size: 10)).foregroundColor(.secondary)
-                        }
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("3.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
-                            Text("Введите Apple ID и пароль, с которого приобретены нужные приложения.").font(.system(size: 10)).foregroundColor(.secondary)
-                        }
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("4.").font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
-                            Text("Вернитесь в OpenRestore — аккаунт и список покупок подтянутся автоматически!").font(.system(size: 10)).foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.leading, 4)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                )
-            }
-            .padding(20)
-        }
-        .frame(width: 500)
     }
 
     // MARK: - Restore & Install Progress Sheet
@@ -2051,7 +2355,7 @@ struct ContentView: View {
 
                 Button("Закрыть") {
                     showDeviceManagerSheet = false
-                    showDeviceInfoSheet = false
+                    showDeviceManagerSheet = false
                 }
                 .buttonStyle(.borderedProminent)
                 .roundedCapsuleButton()
@@ -2250,7 +2554,7 @@ struct ContentView: View {
                                     if dev.isOnline {
                                         Button(action: {
                                             showDeviceManagerSheet = false
-                                            showDeviceInfoSheet = false
+                                            showDeviceManagerSheet = false
                                             storedSidebarTab = SidebarItem.device.rawValue
                                             engine.scanInstalledAppsFromDevice(catalog: catalogApps)
                                         }) {
@@ -2308,6 +2612,7 @@ struct ContentView: View {
     }
 
     private func deviceListCard(dev: DeviceInfo, isOnline: Bool) -> some View {
+        let isActive = engine.activeDevice?.id == dev.id
         let isSelected = (selectedDeviceForDetail?.id ?? engine.activeDevice?.id) == dev.id
         return Button(action: {
             selectedDeviceForDetail = dev
@@ -2319,17 +2624,29 @@ struct ContentView: View {
                 ZStack {
                     Circle()
                         .fill(isOnline ? (dev.connectionType == .usb ? Color.green.opacity(0.15) : Color.blue.opacity(0.15)) : Color.secondary.opacity(0.12))
-                        .frame(width: 30, height: 30)
+                        .frame(width: 32, height: 32)
                     Image(systemName: isOnline ? dev.connectionType.icon : "icloud.slash")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundColor(isOnline ? (dev.connectionType == .usb ? .green : .blue) : .secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(dev.name)
-                        .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(dev.name)
+                            .font(.system(size: 12, weight: isActive ? .bold : .medium))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+
+                        if isOnline {
+                            Text(dev.connectionType == .usb ? "USB" : "Wi-Fi")
+                                .font(.system(size: 8, weight: .bold))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(dev.connectionType == .usb ? Color.green.opacity(0.15) : Color.blue.opacity(0.15))
+                                .foregroundColor(dev.connectionType == .usb ? .green : .blue)
+                                .clipShape(Capsule())
+                        }
+                    }
 
                     HStack(spacing: 4) {
                         Text(dev.ownerName)
@@ -2344,18 +2661,25 @@ struct ContentView: View {
 
                 Spacer()
 
-                if isSelected {
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 6, height: 6)
+                if isActive {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.green).frame(width: 5, height: 5)
+                        Text("Активно")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.green)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.12))
+                    .clipShape(Capsule())
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(isActive ? Color.green.opacity(0.08) : (isSelected ? Color.blue.opacity(0.08) : Color.primary.opacity(0.03)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? Color.blue.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
+                    .stroke(isActive ? Color.green.opacity(0.3) : (isSelected ? Color.blue.opacity(0.2) : Color.primary.opacity(0.06)), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -2458,22 +2782,29 @@ struct ContentView: View {
         Task {
             for (adamId, name) in selectedApps {
                 engine.appendLog("📦 Пакетная загрузка [\(batchDone + 1)/\(batchTotal)]: \(name)")
-                engine.dismissConfiguratorModals()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 800_000_000)
 
                 var downloadSuccess = false
                 var downloadedPath: String? = nil
 
-                if preferDirectMode {
-                    let (ok, _, ipa) = await engine.downloadDirectAppStore(adamId: adamId, name: name)
+                if currentEngineMode == .direct {
+                    let (ok, msg, ipa) = await engine.downloadDirectAppStore(adamId: adamId, name: name)
                     if ok, let p = ipa {
                         downloadSuccess = true
                         downloadedPath = p
                         engine.appendLog("✅ Скачан: \(name)")
+                    } else if msg.contains("AUTH_REQUIRED") {
+                        engine.appendLog("🔐 Требуется авторизация в Apple ID...")
+                        DispatchQueue.main.async {
+                            self.isBatchDownloading = false
+                            self.showAppleIdSheet = true
+                        }
+                        break
+                    } else {
+                        engine.appendLog("⚠️ Не удалось скачать «\(name)»: \(msg)")
                     }
-                }
-
-                if !downloadSuccess {
+                } else {
+                    // Configurator Mode
                     do {
                         engine.cleanAllRestoreRequests()
                         try engine.injectRestoreRequest(adamId: adamId)
@@ -2489,21 +2820,20 @@ struct ContentView: View {
                         engine.removeRestoreRequest(adamId: adamId)
                         engine.dismissConfiguratorModals()
                     } catch {
-                        engine.appendLog("❌ Ошибка: \(error.localizedDescription)")
+                        engine.appendLog("❌ Ошибка Configurator: \(error.localizedDescription)")
                         engine.removeRestoreRequest(adamId: adamId)
                         engine.dismissConfiguratorModals()
                     }
                 }
 
-                if downloadSuccess, installToDevice, let ipa = downloadedPath, engine.connectedDevices.first != nil {
-                    let (ok, msg) = await engine.installApp(ipaPath: ipa)
+                if downloadSuccess, installToDevice, let ipa = downloadedPath, let dev = engine.activeDevice ?? engine.connectedDevices.first {
+                    let (ok, msg) = await engine.installApp(ipaPath: ipa, udid: dev.udid)
                     engine.appendLog(ok ? "📲 Установлен: \(name)" : "⚠️ \(msg)")
                 }
 
                 batchDone += 1
                 loadSavedIPAs()
-                engine.dismissConfiguratorModals()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
 
             DispatchQueue.main.async {
@@ -2516,6 +2846,10 @@ struct ContentView: View {
     }
 
     private func startInstallFlow(ipaPath: String, name: String) {
+        if !engine.isDirectAppleIdAuthenticated && currentEngineMode == .direct {
+            showAppleIdSheet = true
+            return
+        }
         guard FileManager.default.fileExists(atPath: ipaPath) else {
             alertMessage = "Файл IPA не найден на диске:\n\(ipaPath)"
             showAlert = true
@@ -2532,8 +2866,10 @@ struct ContentView: View {
         engine.operationStage = "Инициализация установки «\(name)»..."
         isRestoring = true
 
+        let targetUdid = engine.activeDevice?.udid ?? ""
+
         Task {
-            let (ok, msg) = await engine.installApp(ipaPath: ipaPath)
+            let (ok, msg) = await engine.installApp(ipaPath: ipaPath, udid: targetUdid)
             DispatchQueue.main.async {
                 if ok {
                     restoreSuccessIPA = ipaPath
@@ -2549,6 +2885,10 @@ struct ContentView: View {
     }
 
     private func startRestoreFlow(adamId: Int64, name: String, extVersion: Int64 = 0, installToDevice: Bool = false) {
+        if !engine.isDirectAppleIdAuthenticated && currentEngineMode == .direct {
+            showAppleIdSheet = true
+            return
+        }
         guard adamId > 0 else {
             alertMessage = "У приложения «\(name)» отсутствует Adam ID."
             showAlert = true
@@ -2571,24 +2911,39 @@ struct ContentView: View {
         isRestoring = true
 
         Task {
-            if preferDirectMode {
-                engine.appendLog("⚡ Прямой режим (Adam ID: \(adamId))...")
+            if currentEngineMode == .direct {
+                engine.appendLog("⚡ Прямой нативный режим (Adam ID: \(adamId))...")
                 let (ok, msg, ipa) = await engine.downloadDirectAppStore(adamId: adamId, name: name)
                 if ok, let path = ipa {
                     engine.appendLog("🎉 Скачан: \(path)")
                     restoreSuccessIPA = path
-                    if shouldInstallAfterDownload, let dev = engine.connectedDevices.first {
-                        let (ok2, msg2) = await engine.installApp(ipaPath: path)
+                    if shouldInstallAfterDownload, let dev = engine.activeDevice ?? engine.connectedDevices.first {
+                        let (ok2, msg2) = await engine.installApp(ipaPath: path, udid: dev.udid)
                         engine.appendLog(ok2 ? "✅ Установлено на \(dev.name)!" : "⚠️ \(msg2)")
+                        DispatchQueue.main.async {
+                            if !ok2 { self.restoreError = msg2 }
+                        }
                     }
                     loadSavedIPAs()
                     return
+                } else if msg.contains("AUTH_REQUIRED") {
+                    engine.appendLog("🔐 Требуется авторизация в Apple ID...")
+                    DispatchQueue.main.async {
+                        self.isRestoring = false
+                        self.showAppleIdSheet = true
+                    }
+                    return
                 } else {
-                    engine.appendLog("ℹ️ \(msg)")
-                    engine.appendLog("🔄 Переключаюсь на Configurator...")
+                    engine.appendLog("❌ Ошибка загрузки: \(msg)")
+                    DispatchQueue.main.async {
+                        self.restoreError = msg
+                        self.engine.operationStage = "Ошибка: \(msg)"
+                    }
+                    return
                 }
             }
 
+            // Apple Configurator Mode
             do {
                 if engine.isConfiguratorRunning() { engine.quitConfigurator() }
                 try engine.injectRestoreRequest(adamId: adamId, extVersion: extVersion)
@@ -2600,15 +2955,18 @@ struct ContentView: View {
                 let result = try await engine.watchAndCapture(adamId: adamId, knownName: name)
                 engine.appendLog("🎉 IPA сохранён: \(result.path)")
                 restoreSuccessIPA = result.path
-                if shouldInstallAfterDownload, let dev = engine.connectedDevices.first {
-                    let (ok, msg) = await engine.installApp(ipaPath: result.path)
+                if shouldInstallAfterDownload, let dev = engine.activeDevice ?? engine.connectedDevices.first {
+                    let (ok, msg) = await engine.installApp(ipaPath: result.path, udid: dev.udid)
                     engine.appendLog(ok ? "✅ Установлено на \(dev.name)!" : "⚠️ \(msg)")
                 }
                 engine.removeRestoreRequest(adamId: adamId)
                 loadSavedIPAs()
             } catch {
-                engine.appendLog("Ошибка: \(error.localizedDescription)")
+                engine.appendLog("Ошибка Configurator: \(error.localizedDescription)")
                 engine.removeRestoreRequest(adamId: adamId)
+                DispatchQueue.main.async {
+                    self.restoreError = error.localizedDescription
+                }
             }
         }
     }
@@ -2631,10 +2989,15 @@ struct ContentView: View {
         let df = DateFormatter()
         df.dateFormat = "dd.MM.yyyy HH:mm"
 
-        for f in files.filter({ $0.hasSuffix(".ipa") }).sorted(by: <) {
+        for f in files.filter({ $0.hasSuffix(".ipa") || $0.hasSuffix(".tmp") }).sorted(by: <) {
             let full = "\(path)/\(f)"
             if let attrs = try? FileManager.default.attributesOfItem(atPath: full) {
                 let sizeBytes = (attrs[.size] as? Int64) ?? 0
+                if f.hasSuffix(".tmp") || sizeBytes < 500_000 {
+                    // Automatically clean up broken / 22-byte dummy files and unfinished tmp files
+                    try? FileManager.default.removeItem(atPath: full)
+                    continue
+                }
                 let sizeMB = String(format: "%.1f MB", Double(sizeBytes) / (1024.0 * 1024.0))
                 let modDate = (attrs[.modificationDate] as? Date) ?? Date()
                 let baseName = (f as NSString).deletingPathExtension
@@ -2642,12 +3005,46 @@ struct ContentView: View {
                 var verStr = ""
                 var adamId = ""
 
+                var artUrl: String? = nil
+
                 if let vRange = baseName.range(of: " v", options: .backwards) {
                     dispName = String(baseName[..<vRange.lowerBound])
                     verStr = String(baseName[vRange.lowerBound...]).trimmingCharacters(in: .whitespaces)
                 } else if let dash = baseName.components(separatedBy: "-").first, Int64(dash) != nil {
                     adamId = dash
-                    if let m = catalogApps.first(where: { String($0.adam_id) == adamId }) { dispName = m.name }
+                    let rest = String(baseName.dropFirst(dash.count + 1)).trimmingCharacters(in: .whitespaces)
+                    if !rest.isEmpty { dispName = rest }
+                    if let m = catalogApps.first(where: { String($0.adam_id) == adamId }) {
+                        dispName = m.name
+                    } else if let devApp = engine.oldDeviceApps.first(where: { String($0.adamId ?? 0) == adamId }) {
+                        dispName = devApp.name
+                        artUrl = devApp.artworkUrl
+                    } else if let p = engine.purchasedApps.first(where: { String($0.adamId) == adamId }) {
+                        dispName = p.name
+                        artUrl = p.artworkUrl
+                    }
+                } else if let under = baseName.components(separatedBy: "_").first, Int64(under) != nil {
+                    adamId = under
+                    let parts = baseName.components(separatedBy: "_")
+                    if parts.count > 1 { verStr = parts.last ?? "" }
+                    if let m = catalogApps.first(where: { String($0.adam_id) == adamId }) {
+                        dispName = m.name
+                    } else if let devApp = engine.oldDeviceApps.first(where: { String($0.adamId ?? 0) == adamId }) {
+                        dispName = devApp.name
+                        artUrl = devApp.artworkUrl
+                    } else if let p = engine.purchasedApps.first(where: { String($0.adamId) == adamId }) {
+                        dispName = p.name
+                        artUrl = p.artworkUrl
+                    }
+                } else {
+                    if let m = catalogApps.first(where: { $0.name.lowercased() == baseName.lowercased() }) {
+                        dispName = m.name
+                        adamId = String(m.adam_id)
+                    } else if let p = engine.purchasedApps.first(where: { $0.name.lowercased() == baseName.lowercased() }) {
+                        dispName = p.name
+                        artUrl = p.artworkUrl
+                        adamId = String(p.adamId)
+                    }
                 }
 
                 list.append(SavedIPA(
@@ -2657,11 +3054,40 @@ struct ContentView: View {
                     path: full,
                     size: sizeMB,
                     date: df.string(from: modDate),
-                    adamId: adamId
+                    adamId: adamId,
+                    artworkUrl: artUrl
                 ))
             }
         }
-        savedIPAs = list
+        DispatchQueue.main.async {
+            self.savedIPAs = list
+        }
+
+        let missingArt = list.filter { ($0.artworkUrl == nil || $0.artworkUrl?.isEmpty == true) && !$0.adamId.isEmpty }
+        if !missingArt.isEmpty {
+            Task {
+                let idList = missingArt.map { $0.adamId }.joined(separator: ",")
+                for country in ["ru", "us"] {
+                    guard let url = URL(string: "https://itunes.apple.com/lookup?id=\(idList)&country=\(country)") else { continue }
+                    var req = URLRequest(url: url, timeoutInterval: 5.0)
+                    req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                    if let (data, _) = try? await URLSession.shared.data(for: req),
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let results = json["results"] as? [[String: Any]] {
+                        DispatchQueue.main.async {
+                            for res in results {
+                                if let trackId = res["trackId"] as? Int64,
+                                   let art = (res["artworkUrl100"] as? String) ?? (res["artworkUrl60"] as? String) ?? (res["artworkUrl512"] as? String) {
+                                    if let idx = self.savedIPAs.firstIndex(where: { $0.adamId == String(trackId) }) {
+                                        self.savedIPAs[idx].artworkUrl = art
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func startBatchInstallSavedIPAs() {
@@ -2672,6 +3098,12 @@ struct ContentView: View {
         batchInstallCurrent = 0
 
         Task {
+            guard engine.activeDevice?.isOnline == true else {
+                alertMessage = "Устройство офлайн!"
+                showAlert = true
+                isBatchInstallingIPAs = false
+                return
+            }
             for (idx, ipaPath) in toInstall.enumerated() {
                 batchInstallCurrent = idx + 1
                 let (ok, msg) = await engine.installApp(ipaPath: ipaPath)
@@ -2688,7 +3120,7 @@ struct ContentView: View {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = []
+        panel.allowedContentTypes = [UTType(filenameExtension: "ipa")].compactMap { $0 }
         if panel.runModal() == .OK {
             for url in panel.urls {
                 let dest = "\(effectiveLibraryPath)/\(url.lastPathComponent)"

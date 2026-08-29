@@ -31,17 +31,13 @@ cat << 'PLIST' > OpenRestore.app/Contents/Info.plist
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.5.0</string>
+    <string>1.6.0</string>
     <key>CFBundleVersion</key>
-    <string>1.5.0</string>
+    <string>1.6.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>OpenRestore управляет Apple Configurator для автоматического восстановления приложений.</string>
-    <key>NSSystemAdministrationUsageDescription</key>
-    <string>OpenRestore управляет устройствами через Apple Configurator.</string>
 </dict>
 </plist>
 PLIST
@@ -51,15 +47,13 @@ cat << 'ENT' > openrestore.entitlements
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.automation.apple-events</key>
-    <true/>
 </dict>
 </plist>
 ENT
 
 echo "Компиляция нативного Universal 2 приложения (Apple Silicon arm64 + Intel x86_64)..."
 rm -rf module_cache build_tmp
-mkdir -p build_tmp OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources
+mkdir -p build_tmp OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources/bin
 
 swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
   native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
@@ -77,10 +71,33 @@ if [ -f "AppIcon.icns" ]; then
   cp AppIcon.icns OpenRestore.app/Contents/Resources/AppIcon.icns
 fi
 
+if [ -f "bin/ios" ]; then
+  cp bin/ios OpenRestore.app/Contents/Resources/bin/ios
+  chmod +x OpenRestore.app/Contents/Resources/bin/ios
+fi
+
+if [ -f "bin/ipatool" ]; then
+  cp bin/ipatool OpenRestore.app/Contents/Resources/bin/ipatool
+  chmod +x OpenRestore.app/Contents/Resources/bin/ipatool
+  codesign --force --identifier com.openrestore.ipatool -s - OpenRestore.app/Contents/Resources/bin/ipatool
+fi
+
+if [ -f "bin/ios-scanner" ]; then
+  cp bin/ios-scanner OpenRestore.app/Contents/Resources/bin/ios-scanner
+  chmod +x OpenRestore.app/Contents/Resources/bin/ios-scanner
+  codesign --force --identifier com.openrestore.ios-scanner -s - OpenRestore.app/Contents/Resources/bin/ios-scanner
+fi
+
+if [ -f "bin/ios" ]; then
+  cp bin/ios OpenRestore.app/Contents/Resources/bin/ios
+  chmod +x OpenRestore.app/Contents/Resources/bin/ios
+  codesign --force --identifier com.openrestore.ios -s - OpenRestore.app/Contents/Resources/bin/ios
+fi
+
 xattr -cr OpenRestore.app
 codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - OpenRestore.app
 
 touch OpenRestore.app
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -trusted OpenRestore.app 2>/dev/null || true
 
-echo "Готово! OpenRestore.app успешно собрано (Universal 2: arm64 + x86_64) и подписано."
+echo "Готово! OpenRestore.app успешно собрано (Universal 2: arm64 + x86_64, Standalone) и подписано."

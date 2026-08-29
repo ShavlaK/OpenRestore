@@ -1,0 +1,50 @@
+{
+  "name": "Apple Configurator Direct Bypass",
+  "domainMatcher": "hybrid",
+  "domainStrategy": "IPIfNonMatch",
+  "rules": [
+    {
+      "type": "field",
+      "outboundTag": "direct",
+      "ip": [
+        "17.0.0.0/8",
+        "geoip:private",
+        "geoip:ru"
+      ]
+    },
+    {
+      "type": "field",
+      "outboundTag": "direct",
+      "domain": [
+        "apple.com",
+        "*.apple.com",
+        "itunes.apple.com",
+        "*.itunes.apple.com",
+        "mzstatic.com",
+        "*.mzstatic.com",
+        "buy.itunes.apple.com",
+        "*.buy.itunes.apple.com",
+        "vpp.itunes.apple.com",
+        "*.vpp.itunes.apple.com",
+        "cdn-apple.com",
+        "*.cdn-apple.com",
+        "aaplimg.com",
+        "*.aaplimg.com",
+        "icloud.com",
+        "*.icloud.com",
+        "appstore.com",
+        "*.appstore.com",
+        "albert.apple.com",
+        "gsa.apple.com",
+        "identity.apple.com",
+        "geosite:apple",
+        "geosite:category-ru"
+      ]
+    },
+    {
+      "type": "field",
+      "outboundTag": "proxy",
+      "network": "tcp,udp"
+    }
+  ]
+}

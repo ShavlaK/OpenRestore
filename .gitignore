@@ -3,8 +3,9 @@
 .AppleDouble
 .LSOverride
 ._*
+.Trash/
 
-# Build artifacts & caches
+# Build & temp directories
 module_cache/
 __pycache__/
 *.pyc
@@ -12,22 +13,28 @@ __pycache__/
 venv/
 .venv/
 env/
-
-# Logs & temporary files
-*.log
 scratch/
-.tempmediaStorage/
-.user_uploaded/
+build_tmp/
+tmp_arch/
+OpenRestore_Release/
+bmrng_new_inspect/
+
+# Logs & temp files
+*.log
 *.tmp
 *.temp
-
-# Downloaded iOS packages (large binaries)
-*.ipa
-Downloads/
-OpenRestore_Library/
+.tempmediaStorage/
+.user_uploaded/
+native_app/scratch_test_ipatool.swift
 
 # User-specific keychain artifacts
 *.crt
 *.key
 *.p12
 *.cnf
+selfIdentity.plist
+
+# Large IPAs
+*.ipa
+Downloads/
+OpenRestore_Library/

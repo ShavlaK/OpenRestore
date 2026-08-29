@@ -1,6 +1,131 @@
 {
   "apps": [
     {
+      "name": "Онлайн (СберБанк)",
+      "bundle_id": "com.digit.budg",
+      "bundle_ids": [
+        "com.digit.budg",
+        "ru.sberbank.onlineiphone",
+        "ru.sberbank.sbol",
+        "ru.sberbank.ios.sbol",
+        "ru.sber.sbol",
+        "ru.sberbank.invest",
+        "ru.sber.budget"
+      ],
+      "adam_id": 6749261529,
+      "category": "Банки и финансы",
+      "description": "СберБанк Онлайн (версия Онлайн)"
+    },
+    {
+      "name": "Мой Отзыв (Т-Банк / Тинькофф)",
+      "bundle_id": "ru.myreview",
+      "bundle_ids": [
+        "ru.myreview",
+        "com.tcsbank.mobile",
+        "com.tcsbank.business",
+        "ru.tinkoff.invest",
+        "ru.tinkoff.junior"
+      ],
+      "adam_id": 6754170588,
+      "category": "Банки и финансы",
+      "description": "Т-Банк (версия Мой Отзыв)"
+    },
+    {
+      "name": "Накопи Фест (ВТБ Онлайн)",
+      "bundle_id": "com.whenly.app",
+      "bundle_ids": [
+        "com.whenly.app",
+        "ru.vtb24.mobilebanking.ios",
+        "ru.vtb.mobilebanking",
+        "ru.vtb.invest"
+      ],
+      "adam_id": 6759036480,
+      "category": "Банки и финансы",
+      "description": "ВТБ Онлайн (версия Накопи Фест)"
+    },
+    {
+      "name": "ФинГрам (Совкомбанк)",
+      "bundle_id": "ru.fingram",
+      "bundle_ids": [
+        "ru.fingram",
+        "ru.sovcomcard.halva",
+        "ru.sovcombank.business"
+      ],
+      "adam_id": 6758455334,
+      "category": "Банки и финансы",
+      "description": "Финграм (клиент Совкомбанк)"
+    },
+    {
+      "name": "РС Онлайн (Банк Русский Стандарт)",
+      "bundle_id": "com.rsins.rs",
+      "bundle_ids": [
+        "com.rsins.rs"
+      ],
+      "adam_id": 6446702225,
+      "category": "Банки и финансы",
+      "description": "Русский Стандарт Онлайн"
+    },
+    {
+      "name": "Ягодный Фест",
+      "bundle_id": "com.berries.volfest.berriesVolfest",
+      "bundle_ids": [
+        "com.berries.volfest.berriesVolfest"
+      ],
+      "adam_id": 6754039506,
+      "category": "Покупки",
+      "description": "Ягодный Фест (клиент маркетплейса)"
+    },
+    {
+      "name": "УП - доставка",
+      "bundle_id": "ru.smartbuys.delivery",
+      "bundle_ids": [
+        "ru.smartbuys.delivery"
+      ],
+      "adam_id": 6744347739,
+      "category": "Доставка и еда",
+      "description": "УП - доставка продуктов"
+    },
+    {
+      "name": "Сравни",
+      "bundle_id": "ru.sravni",
+      "bundle_ids": [
+        "ru.sravni"
+      ],
+      "adam_id": 6755602284,
+      "category": "Банки и финансы",
+      "description": "Сравни.ру - подбор кредитов и страховок"
+    },
+    {
+      "name": "Яндекс Пэй",
+      "bundle_id": "com.yandex.fintech.bank-app",
+      "bundle_ids": [
+        "com.yandex.fintech.bank-app"
+      ],
+      "adam_id": 1634422317,
+      "category": "Банки и финансы",
+      "description": "Яндекс Пэй и Сейвы"
+    },
+    {
+      "name": "Чижик",
+      "bundle_id": "club.chizhik.iosapp",
+      "bundle_ids": [
+        "club.chizhik.iosapp"
+      ],
+      "adam_id": 1604205783,
+      "category": "Покупки",
+      "description": "Сеть магазинов Чижик"
+    },
+    {
+      "name": "Дом (ГИС ЖКХ)",
+      "bundle_id": "ru.sigma.gisgkh",
+      "bundle_ids": [
+        "ru.sigma.gisgkh"
+      ],
+      "adam_id": 1437518854,
+      "category": "Утилиты",
+      "description": "Госуслуги Дом"
+    },
+    {
       "name": "ВКонтакте",
       "bundle_id": "com.vk.vkclient",
       "bundle_ids": [

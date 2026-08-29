@@ -4,7 +4,7 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 DIST_DIR="$DIR/dist"
 RELEASE_DIR="$DIR/OpenRestore_Release"
 

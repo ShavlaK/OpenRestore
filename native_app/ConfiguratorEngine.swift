@@ -2,6 +2,85 @@ import Foundation
 import AppKit
 import SQLite3
 
+public final class StandaloneToolchain: @unchecked Sendable {
+    public static let shared = StandaloneToolchain()
+
+    public let appSupportDir: String
+    public let binDir: String
+
+    public var iosBinaryPath: String {
+        bestBinaryPath(named: "ios")
+    }
+
+    public var ipatoolBinaryPath: String {
+        bestBinaryPath(named: "ipatool")
+    }
+
+    public var iosScannerBinaryPath: String {
+        bestBinaryPath(named: "ios-scanner")
+    }
+
+    public init() {
+        let home = NSHomeDirectory()
+        self.appSupportDir = "\(home)/Library/Application Support/OpenRestore"
+        self.binDir = "\(appSupportDir)/bin"
+        ensureBinariesExist()
+    }
+
+    private func bestBinaryPath(named name: String) -> String {
+        // 1. Prioritize binary bundled directly in the App Bundle Resources
+        if let resPath = Bundle.main.resourcePath {
+            let bundlePath = "\(resPath)/bin/\(name)"
+            if FileManager.default.isExecutableFile(atPath: bundlePath) {
+                return bundlePath
+            }
+        }
+        let appContentsPath = "\(Bundle.main.bundlePath)/Contents/Resources/bin/\(name)"
+        if FileManager.default.isExecutableFile(atPath: appContentsPath) {
+            return appContentsPath
+        }
+
+        // 2. Fallback to Application Support bin directory
+        let appSupportPath = "\(binDir)/\(name)"
+        if FileManager.default.isExecutableFile(atPath: appSupportPath) {
+            return appSupportPath
+        }
+
+        return appSupportPath
+    }
+
+    public func ensureBinariesExist() {
+        try? FileManager.default.createDirectory(atPath: binDir, withIntermediateDirectories: true)
+
+        let candidateDirs = [
+            "\(Bundle.main.resourcePath ?? "")/bin",
+            "\(Bundle.main.bundlePath)/Contents/Resources/bin"
+        ]
+
+        let binaries = ["ios", "ipatool", "ios-scanner"]
+
+        for name in binaries {
+            let destPath = "\(binDir)/\(name)"
+            for dir in candidateDirs {
+                let srcPath = "\(dir)/\(name)"
+                if FileManager.default.fileExists(atPath: srcPath) {
+                    let srcSize = (try? FileManager.default.attributesOfItem(atPath: srcPath)[.size] as? Int64) ?? 0
+                    let destSize = (try? FileManager.default.attributesOfItem(atPath: destPath)[.size] as? Int64) ?? 0
+
+                    if !FileManager.default.fileExists(atPath: destPath) || srcSize != destSize {
+                        try? FileManager.default.removeItem(atPath: destPath)
+                        try? FileManager.default.copyItem(atPath: srcPath, toPath: destPath)
+                    }
+                    break
+                }
+            }
+            if FileManager.default.fileExists(atPath: destPath) {
+                chmod(destPath, 0o755)
+            }
+        }
+    }
+}
+
 public enum DeviceConnectionType: String, Codable, Sendable, CaseIterable {
     case usb = "USB"
     case wifi = "Wi-Fi"
@@ -76,7 +155,7 @@ public struct AppItem: Identifiable, Codable, Hashable {
     public let description: String
 }
 
-public struct PurchasedApp: Identifiable, Hashable, Sendable {
+public struct PurchasedApp: Identifiable, Hashable, Sendable, Codable {
     public var id: Int64 { adamId }
     public let adamId: Int64
     public let name: String
@@ -230,7 +309,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     }()
 
     public static let cfgutilPath = "/Applications/Apple Configurator.app/Contents/MacOS/cfgutil"
-    public static let workDir = "/Users/shavlak_1/Desktop/Рабочий стол/BMRNG or Analog"
+    public static let workDir = Bundle.main.resourcePath ?? "/tmp"
     public static let libraryDir: String = {
         let home = NSHomeDirectory()
         return "\(home)/Downloads/OpenRestore"
@@ -238,6 +317,10 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
 
     public static let userMappingsPath: String = {
         return "\(libraryDir)/adam_mappings.json"
+    }()
+
+    public static let purchasesCachePath: String = {
+        return "\(libraryDir)/purchases_cache.json"
     }()
 
     // Known Russian/Delisted/Sanctioned apps removed from App Store
@@ -286,6 +369,15 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     @Published public var connectedDevices: [DeviceInfo] = []
     @Published public var knownDevices: [DeviceInfo] = []
     @Published public var selectedDeviceId: String = ""
+    @Published public var userManuallySelectedDeviceId: String? = UserDefaults.standard.string(forKey: "userManuallySelectedDeviceId") {
+        didSet {
+            if let val = userManuallySelectedDeviceId {
+                UserDefaults.standard.set(val, forKey: "userManuallySelectedDeviceId")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "userManuallySelectedDeviceId")
+            }
+        }
+    }
 
     public var activeDevice: DeviceInfo? {
         if !selectedDeviceId.isEmpty {
@@ -296,10 +388,13 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                 return d
             }
         }
-        return connectedDevices.first ?? knownDevices.first
+        return connectedDevices.first(where: { $0.connectionType == .usb }) ?? connectedDevices.first ?? knownDevices.first
     }
 
     @Published public var purchasedApps: [PurchasedApp] = []
+    @Published public var isLoadingPurchasedApps: Bool = false
+    @Published public var totalPurchasedAppsCount: Int = 0
+    private var isRefreshingPurchasesInProgress = false
     @Published public var oldDeviceApps: [DeviceInstalledApp] = []
     @Published public var currentAccountDsid: String = ""
     @Published public var isRunning: Bool = false
@@ -311,6 +406,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     @Published public var activeAppleIdEmail: String = ""
     @Published public var activeAppleIdName: String = ""
     @Published public var isAppleIdAuthenticated: Bool = false
+    @Published public var isDirectAppleIdAuthenticated: Bool = false
     @Published public var autoSignWithAppleId: Bool = true
 
     // Permissions State
@@ -332,7 +428,8 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     public init() {
         LogManager.shared.log("OpenRestore Engine инициализирован. Библиотека: \(Self.libraryDir)", level: "INIT")
         cleanAllRestoreRequests()
-        checkAllPermissions()
+
+        self.refreshAppleIdStatus()
         refreshDevices()
         refreshPurchasedApps()
         startDevicePolling()
@@ -342,18 +439,12 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         devicePollTimer?.invalidate()
     }
 
-    private var pollCycle: Int = 0
-
     public func startDevicePolling() {
         DispatchQueue.main.async {
             self.devicePollTimer?.invalidate()
-            self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
                 self.refreshDevices()
-                self.pollCycle += 1
-                if self.pollCycle % 2 == 0 {
-                    self.refreshAppleIdStatus()
-                }
             }
         }
     }
@@ -373,7 +464,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         // --- Accessibility (AX) ---
         // AXIsProcessTrustedWithOptions is reliable and fast. It reflects the
         // CURRENT binary's trust status in TCC immediately.
-        let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false]
+        let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         let axGranted = AXIsProcessTrustedWithOptions(options)
 
         // --- Automation ---
@@ -443,7 +534,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
 
     public func requestAutomationPrompt() {
         let script = NSAppleScript(source: """
-        tell application "Apple Configurator" to activate
         tell application "System Events" to get name
         """)
         var errInfo: NSDictionary?
@@ -522,8 +612,16 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     }
 
     public func selectDevice(id: String) {
+        let previousId = self.selectedDeviceId
+        self.userManuallySelectedDeviceId = id
         self.selectedDeviceId = id
-        appendLog("Выбрано активное устройство: \(activeDevice?.name ?? id)", level: "DEVICE")
+        let connName = activeDevice?.connectionType == .usb ? "USB (Кабель)" : (activeDevice?.connectionType == .wifi ? "Wi-Fi (Сеть)" : "Офлайн")
+        appendLog("Выбрано единственное активное устройство: «\(activeDevice?.name ?? id)» [\(connName)]", level: "DEVICE")
+
+        // If active device changed, automatically scan installed apps on the newly selected device
+        if previousId != id {
+            self.scanInstalledAppsFromDevice()
+        }
     }
 
     public func updateOwnerName(id: String, newName: String) {
@@ -545,14 +643,20 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             let onlineDevs = self.getConnectedDevicesDetails()
 
             DispatchQueue.main.async {
-                self.connectedDevices = onlineDevs
+                // Priority sorting: USB (Cable) takes top priority over Wi-Fi
+                let sortedOnline = onlineDevs.sorted { d1, d2 in
+                    if d1.connectionType == .usb && d2.connectionType != .usb { return true }
+                    if d1.connectionType != .usb && d2.connectionType == .usb { return false }
+                    return d1.name < d2.name
+                }
+                self.connectedDevices = sortedOnline
 
                 var updatedKnown = self.knownDevices
                 if updatedKnown.isEmpty {
                     updatedKnown = self.loadKnownDevices()
                 }
 
-                for online in onlineDevs {
+                for online in sortedOnline {
                     if let idx = updatedKnown.firstIndex(where: { $0.id == online.id || (!online.udid.isEmpty && $0.udid == online.udid) }) {
                         var existing = updatedKnown[idx]
                         existing.name = online.name
@@ -577,7 +681,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
 
                 for i in 0..<updatedKnown.count {
                     let k = updatedKnown[i]
-                    if !onlineDevs.contains(where: { $0.id == k.id || (!k.udid.isEmpty && $0.udid == k.udid) }) {
+                    if !sortedOnline.contains(where: { $0.id == k.id || (!k.udid.isEmpty && $0.udid == k.udid) }) {
                         updatedKnown[i].isOnline = false
                         updatedKnown[i].connectionType = .offline
                     }
@@ -586,21 +690,182 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                 self.knownDevices = updatedKnown
                 self.saveKnownDevices()
 
-                if self.selectedDeviceId.isEmpty || !updatedKnown.contains(where: { $0.id == self.selectedDeviceId }) {
-                    self.selectedDeviceId = onlineDevs.first?.id ?? updatedKnown.first?.id ?? ""
+                // Selection Logic:
+                // 1. If user manually chose a device and it is still online, preserve user choice!
+                if let manualId = self.userManuallySelectedDeviceId,
+                   let matching = sortedOnline.first(where: { $0.id == manualId || (!manualId.isEmpty && $0.udid == manualId) }) {
+                    self.selectedDeviceId = matching.id
+                } else {
+                    // 2. Automatic selection: USB cable takes precedence over Wi-Fi
+                    if let usbDev = sortedOnline.first(where: { $0.connectionType == .usb }) {
+                        self.selectedDeviceId = usbDev.id
+                    } else if let wifiDev = sortedOnline.first {
+                        self.selectedDeviceId = wifiDev.id
+                    } else if self.selectedDeviceId.isEmpty || !updatedKnown.contains(where: { $0.id == self.selectedDeviceId }) {
+                        self.selectedDeviceId = updatedKnown.first?.id ?? ""
+                    }
+                }
+
+                if self.oldDeviceApps.isEmpty && !sortedOnline.isEmpty {
+                    self.scanInstalledAppsFromDevice()
                 }
             }
         }
     }
 
+    public func loadCachedPurchases() -> [PurchasedApp] {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: Self.purchasesCachePath)),
+              let apps = try? JSONDecoder().decode([PurchasedApp].self, from: data) else {
+            return []
+        }
+        return apps
+    }
+
+    public func saveCachedPurchases(_ apps: [PurchasedApp]) {
+        guard let data = try? JSONEncoder().encode(apps) else { return }
+        try? FileManager.default.createDirectory(atPath: Self.libraryDir, withIntermediateDirectories: true)
+        try? data.write(to: URL(fileURLWithPath: Self.purchasesCachePath))
+    }
+
     public func refreshPurchasedApps() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let apps = self.loadPurchasedAppsFromDB()
-            let dsid = self.getOwnerDsid() ?? ""
-            DispatchQueue.main.async {
-                self.purchasedApps = apps
-                self.currentAccountDsid = dsid
+            if self.isRefreshingPurchasesInProgress { return }
+            self.isRefreshingPurchasesInProgress = true
+            defer { self.isRefreshingPurchasesInProgress = false }
+            
+            let isDirect = UserDefaults.standard.bool(forKey: "isDirectAppleIdAuthenticated")
+            
+            if isDirect {
+                // Immediately show cached apps if available
+                if self.purchasedApps.isEmpty {
+                    let cached = self.loadCachedPurchases()
+                    if !cached.isEmpty {
+                        DispatchQueue.main.async {
+                            self.purchasedApps = cached
+                            self.totalPurchasedAppsCount = cached.count
+                        }
+                    }
+                }
+                
+                DispatchQueue.main.async {
+                    self.isLoadingPurchasedApps = true
+                }
+                
+                let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
+                if FileManager.default.isExecutableFile(atPath: ipatoolBin) {
+                    struct IpatoolListResponse: Codable {
+                        struct AppItem: Codable {
+                            let id: Int64
+                            let bundleID: String
+                            let name: String
+                        }
+                        let count: Int?
+                        let totalCount: Int?
+                        let page: Int?
+                        let apps: [AppItem]?
+                    }
+                    
+                    var currentPage = 1
+                    var totalCount = 0
+                    var finalApps: [PurchasedApp] = []
+                    var seenIds = Set<Int64>()
+                    
+                    while true {
+                        let (status, data) = Self.runProcessWithSafeOutput(
+                            executable: ipatoolBin,
+                            arguments: ["list-purchases", "--format", "json", "--non-interactive", "--keychain-passphrase", Self.ipatoolPassphrase, "-l", "100", "-p", "\(currentPage)"],
+                            timeout: 30.0
+                        )
+                        
+                        guard status == 0, let rawOut = String(data: data, encoding: .utf8), !rawOut.contains("failed to list purchases") else {
+                            break
+                        }
+                        
+                        guard let dict = try? JSONDecoder().decode(IpatoolListResponse.self, from: data),
+                              let appsList = dict.apps, !appsList.isEmpty else {
+                            break
+                        }
+                        
+                        if let tc = dict.totalCount {
+                            totalCount = tc
+                        }
+                        
+                        for appItem in appsList {
+                            if !seenIds.contains(appItem.id) {
+                                seenIds.insert(appItem.id)
+                                finalApps.append(PurchasedApp(
+                                    adamId: appItem.id,
+                                    name: appItem.name,
+                                    bundleId: appItem.bundleID,
+                                    artworkUrl: nil,
+                                    versionId: 0,
+                                    purchaseDate: nil,
+                                    ownerDsid: self.currentAccountDsid
+                                ))
+                            }
+                        }
+                        
+                        let currentBatch = finalApps
+                        let currentTotal = totalCount
+                        DispatchQueue.main.async {
+                            self.purchasedApps = currentBatch
+                            self.totalPurchasedAppsCount = currentTotal > 0 ? currentTotal : currentBatch.count
+                            
+                            // Automatically enrich any scanned oldDeviceApps that were missing adamId
+                            for i in 0..<self.oldDeviceApps.count {
+                                if self.oldDeviceApps[i].adamId == nil {
+                                    let bId = self.oldDeviceApps[i].bundleId
+                                    if let p = currentBatch.first(where: { $0.bundleId == bId }) {
+                                        self.oldDeviceApps[i].adamId = p.adamId
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if totalCount > 0 && finalApps.count >= totalCount {
+                            break
+                        }
+                        
+                        if appsList.count < 100 {
+                            break
+                        }
+                        
+                        currentPage += 1
+                        if currentPage > 50 {
+                            break
+                        }
+                    }
+                    
+                    if !finalApps.isEmpty {
+                        self.saveCachedPurchases(finalApps)
+                    }
+                }
+                
+                DispatchQueue.main.async {
+                    self.isLoadingPurchasedApps = false
+                }
+            } else {
+                let finalApps = self.loadPurchasedAppsFromDB()
+                let finalDsid = self.getOwnerDsid() ?? ""
+                
+                DispatchQueue.main.async {
+                    self.purchasedApps = finalApps
+                    self.totalPurchasedAppsCount = finalApps.count
+                    if !finalDsid.isEmpty { 
+                        self.currentAccountDsid = finalDsid 
+                    }
+
+                    // Automatically enrich any scanned oldDeviceApps that were missing adamId
+                    for i in 0..<self.oldDeviceApps.count {
+                        if self.oldDeviceApps[i].adamId == nil {
+                            let bId = self.oldDeviceApps[i].bundleId
+                            if let p = finalApps.first(where: { $0.bundleId == bId }) {
+                                self.oldDeviceApps[i].adamId = p.adamId
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -803,32 +1068,191 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         return id.isEmpty ? "iPhone" : id
     }
 
-    public func getConnectedDevicesDetails() -> [DeviceInfo] {
-        let coreScript = Self.workDir + "/ios_core.py"
-        guard FileManager.default.fileExists(atPath: coreScript) else { return [] }
-
+    
+    public static func runProcessWithLiveOutput(executable: String, arguments: [String], timeout: TimeInterval = 1200.0, env: [String: String]? = nil, onOutput: @escaping (String) -> Void) -> (status: Int32, finalData: Data) {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: coreScript)
-        proc.arguments = ["devinfo_all"]
+        if let e = env {
+            var pEnv = ProcessInfo.processInfo.environment
+            for (k, v) in e { pEnv[k] = v }
+            proc.environment = pEnv
+        }
+        proc.executableURL = URL(fileURLWithPath: executable)
+        proc.arguments = arguments
+        
         let pipe = Pipe()
         proc.standardOutput = pipe
-        proc.standardError = Pipe()
+        proc.standardError = pipe
+        
+        var outputData = Data()
+        let lock = NSLock()
+        
+        pipe.fileHandleForReading.readabilityHandler = { fh in
+            let data = fh.availableData
+            if data.isEmpty {
+                pipe.fileHandleForReading.readabilityHandler = nil
+            } else {
+                if let str = String(data: data, encoding: .utf8) {
+                    onOutput(str)
+                }
+                lock.lock()
+                outputData.append(data)
+                lock.unlock()
+            }
+        }
+        
+        do {
+            try proc.run()
+            
+            // Timeout logic
+            var isTimedOut = false
+            let dispatchWorkItem = DispatchWorkItem {
+                if proc.isRunning {
+                    isTimedOut = true
+                    proc.terminate()
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: dispatchWorkItem)
+            
+            proc.waitUntilExit()
+            dispatchWorkItem.cancel()
+            
+            // Force final read
+            pipe.fileHandleForReading.readabilityHandler = nil
+            let finalD = pipe.fileHandleForReading.readDataToEndOfFile()
+            lock.lock()
+            outputData.append(finalD)
+            let resultData = outputData
+            lock.unlock()
+            
+            return (isTimedOut ? -1 : proc.terminationStatus, resultData)
+            
+        } catch {
+            return (-1, Data())
+        }
+    }
 
-        guard (try? proc.run()) != nil else { return [] }
+public static func runProcessWithSafeOutput(executable: String, arguments: [String], timeout: TimeInterval = 25.0, env: [String: String]? = nil) -> (status: Int32, data: Data) {
+        let proc = Process()
+        if let e = env {
+            var pEnv = ProcessInfo.processInfo.environment
+            for (k, v) in e { pEnv[k] = v }
+            proc.environment = pEnv
+        }
+        proc.executableURL = URL(fileURLWithPath: executable)
+        proc.arguments = arguments
 
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 8.0) {
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+
+        var outputData = Data()
+        let group = DispatchGroup()
+        group.enter()
+
+        // Read pipe concurrently in background queue to completely avoid kernel pipe buffer deadlocks on large outputs (>64KB)
+        DispatchQueue.global(qos: .userInitiated).async {
+            outputData = pipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+
+        do {
+            try proc.run()
+        } catch {
+            return (-1, Data())
+        }
+
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + timeout) {
             if proc.isRunning { proc.terminate() }
         }
 
         proc.waitUntilExit()
-        guard proc.terminationStatus == 0 else { return [] }
+        _ = group.wait(timeout: .now() + 3.0)
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return (proc.terminationStatus, outputData)
+    }
+
+    public func getConnectedDevicesDetails() -> [DeviceInfo] {
+        let iosBin = StandaloneToolchain.shared.iosBinaryPath
+        if FileManager.default.isExecutableFile(atPath: iosBin) {
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            if status == 0 && !data.isEmpty {
+                var jsonDict: [String: Any]? = nil
+                if let directDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    jsonDict = directDict
+                } else if let rawString = String(data: data, encoding: .utf8),
+                          let startIdx = rawString.firstIndex(of: "{"),
+                          let endIdx = rawString.lastIndex(of: "}") {
+                    let sub = String(rawString[startIdx...endIdx])
+                    if let subData = sub.data(using: .utf8) {
+                        jsonDict = try? JSONSerialization.jsonObject(with: subData) as? [String: Any]
+                    }
+                }
+
+                if let deviceList = jsonDict?["deviceList"] as? [[String: Any]], !deviceList.isEmpty {
+                    var devMap: [String: DeviceInfo] = [:]
+
+                    for d in deviceList {
+                        let udid = (d["Udid"] as? String) ?? ""
+                        guard !udid.isEmpty else { continue }
+
+                        let productType = (d["ProductType"] as? String) ?? ""
+                        let productVer = (d["ProductVersion"] as? String) ?? ""
+                        let rawConn = (d["ConnectionType"] as? String) ?? "USB"
+                        let connType: DeviceConnectionType = (rawConn.lowercased().contains("net") || rawConn.lowercased().contains("wi")) ? .wifi : .usb
+
+                        var devName = "iPhone"
+                        let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(udid)"], timeout: 3.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                        if nameStatus == 0,
+                           let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
+                           let fetched = nameJson["devicename"] as? String, !fetched.isEmpty {
+                            devName = fetched
+                        }
+
+                        let marketingName = Self.mapMarketingName(productType, modelNumber: "")
+                        let iosVersion = productVer.isEmpty ? "iOS" : (productVer.starts(with: "iOS") ? productVer : "iOS \(productVer)")
+
+                        let newDev = DeviceInfo(
+                            name: devName,
+                            ownerName: Self.extractOwnerName(from: devName),
+                            modelIdentifier: productType,
+                            marketingName: marketingName,
+                            iosVersion: iosVersion,
+                            diskCapacity: "",
+                            battery: "",
+                            udid: udid,
+                            ecid: "",
+                            serialNumber: "",
+                            wifiAddress: "",
+                            connectionType: connType,
+                            isOnline: true,
+                            lastSeen: Date()
+                        )
+
+                        if let existing = devMap[udid] {
+                            if existing.connectionType != .usb && connType == .usb {
+                                devMap[udid] = newDev
+                            }
+                        } else {
+                            devMap[udid] = newDev
+                        }
+                    }
+
+                    let results = Array(devMap.values)
+                    if !results.isEmpty { return results }
+                }
+            }
+        }
+
+        let coreScript = Self.workDir + "/ios_core.py"
+        guard FileManager.default.fileExists(atPath: coreScript) else { return [] }
+
+        let (coreStatus, coreData) = Self.runProcessWithSafeOutput(executable: coreScript, arguments: ["devinfo_all"], timeout: 8.0)
+        guard coreStatus == 0 && !coreData.isEmpty else { return [] }
+
         var rawList: [[String: Any]] = []
-
-        if let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+        if let arr = try? JSONSerialization.jsonObject(with: coreData) as? [[String: Any]] {
             rawList = arr
-        } else if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any], !dict.isEmpty {
+        } else if let dict = try? JSONSerialization.jsonObject(with: coreData) as? [String: Any], !dict.isEmpty {
             rawList = [dict]
         }
 
@@ -846,7 +1270,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             let connStr = (dict["ConnectionType"] as? String) ?? "USB"
             let connType: DeviceConnectionType = (connStr.lowercased().contains("wi") || connStr.lowercased().contains("net")) ? .wifi : .usb
 
-            // Format disk capacity
             var diskStr = ""
             if let totalBytes = dict["TotalDiskCapacity"] as? Int {
                 let gb = Int(round(Double(totalBytes) / 1_000_000_000.0))
@@ -858,7 +1281,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                 diskStr = "\(gb) ГБ\(freeStr)"
             }
 
-            // Format battery
             var battStr = ""
             if let bat = dict["BatteryCurrentCapacity"] as? Int {
                 battStr = "\(bat)%"
@@ -889,28 +1311,167 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         return result
     }
 
+    public var catalogCache: [AppItem] = []
+
     public func scanInstalledAppsFromDevice(ecid: String? = nil, catalog: [AppItem] = []) {
+        if !catalog.isEmpty {
+            self.catalogCache = catalog
+        }
+        let activeCatalog = !catalog.isEmpty ? catalog : self.catalogCache
+
         DispatchQueue.main.async { self.isScanningApps = true }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            let coreScript = "\(Self.workDir)/ios_core.py"
+            let scannerBin = StandaloneToolchain.shared.iosScannerBinaryPath
+            let iosBin = StandaloneToolchain.shared.iosBinaryPath
             var discovered: [DeviceInstalledApp] = []
             let userMappings = self.loadUserMappings()
 
-            if FileManager.default.isExecutableFile(atPath: coreScript) {
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: coreScript)
-                proc.arguments = ["apps"]
-                let pipe = Pipe()
-                proc.standardOutput = pipe
-                proc.standardError = Pipe()
+            var targetUdid = self.activeDevice?.udid ?? ""
+            if targetUdid.isEmpty {
+                targetUdid = self.connectedDevices.first(where: { $0.connectionType == .usb })?.udid
+                    ?? self.connectedDevices.first?.udid ?? ""
+            }
+            if targetUdid.isEmpty && FileManager.default.isExecutableFile(atPath: iosBin) {
+                let online = self.getConnectedDevicesDetails()
+                targetUdid = online.first(where: { $0.connectionType == .usb })?.udid ?? online.first?.udid ?? ""
+            }
 
-                if (try? proc.run()) != nil {
-                    proc.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    if let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            if FileManager.default.isExecutableFile(atPath: scannerBin) {
+                var args: [String] = []
+                if !targetUdid.isEmpty {
+                    args.append("--udid=\(targetUdid)")
+                }
+
+                let (status, data) = Self.runProcessWithSafeOutput(executable: scannerBin, arguments: args, timeout: 25.0)
+                if status == 0 && !data.isEmpty {
+                    var appsArray: [[String: Any]] = []
+
+                    if let directList = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                        appsArray = directList
+                    } else if let rawString = String(data: data, encoding: .utf8),
+                              let startIdx = rawString.firstIndex(of: "["),
+                              let endIdx = rawString.lastIndex(of: "]") {
+                        let jsonSub = String(rawString[startIdx...endIdx])
+                        if let subData = jsonSub.data(using: .utf8),
+                           let list = try? JSONSerialization.jsonObject(with: subData) as? [[String: Any]] {
+                            appsArray = list
+                        }
+                    }
+
+                    for a in appsArray {
+                        let dispName = (a["displayName"] as? String) ?? (a["name"] as? String) ?? ""
+                        let bId = (a["bundleId"] as? String) ?? ""
+                        let bVer = (a["version"] as? String) ?? ""
+                        guard !bId.isEmpty else { continue }
+
+                        var adamId: Int64? = nil
+                        if let aid = a["adamId"] as? Int64, aid > 0 {
+                            adamId = aid
+                        } else if let aidNum = a["adamId"] as? NSNumber, aidNum.int64Value > 0 {
+                            adamId = aidNum.int64Value
+                        }
+
+                        var artworkUrl: String? = nil
+
+                        if let custom = userMappings[bId] { adamId = custom }
+
+                        if adamId == nil {
+                            for cat in activeCatalog {
+                                if cat.bundle_id == bId || (cat.bundle_ids?.contains(bId) == true) {
+                                    adamId = cat.adam_id
+                                    break
+                                }
+                            }
+                        }
+
+                        if adamId == nil {
+                            if let p = self.purchasedApps.first(where: { $0.bundleId == bId }) {
+                                adamId = p.adamId
+                                if artworkUrl == nil { artworkUrl = p.artworkUrl }
+                            }
+                        }
+
+                        discovered.append(DeviceInstalledApp(
+                            name: dispName.isEmpty ? bId : dispName,
+                            displayName: dispName.isEmpty ? bId : dispName,
+                            bundleId: bId,
+                            bundleVersion: bVer,
+                            adamId: adamId,
+                            artworkUrl: artworkUrl
+                        ))
+                    }
+                }
+            }
+
+            if discovered.isEmpty && FileManager.default.isExecutableFile(atPath: iosBin) {
+                var args = ["apps"]
+                if !targetUdid.isEmpty {
+                    args.append("--udid=\(targetUdid)")
+                }
+
+                let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: args, timeout: 30.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                if status == 0 && !data.isEmpty {
+                    var appsArray: [[String: Any]] = []
+
+                    if let directList = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                        appsArray = directList
+                    } else if let rawString = String(data: data, encoding: .utf8),
+                              let startIdx = rawString.firstIndex(of: "["),
+                              let endIdx = rawString.lastIndex(of: "]") {
+                        let jsonSub = String(rawString[startIdx...endIdx])
+                        if let subData = jsonSub.data(using: .utf8),
+                           let list = try? JSONSerialization.jsonObject(with: subData) as? [[String: Any]] {
+                            appsArray = list
+                        }
+                    }
+
+                    for a in appsArray {
+                        let dispName = (a["CFBundleDisplayName"] as? String) ?? (a["CFBundleName"] as? String) ?? ""
+                        let bId = (a["CFBundleIdentifier"] as? String) ?? ""
+                        let bVer = (a["CFBundleShortVersionString"] as? String) ?? (a["CFBundleVersion"] as? String) ?? ""
+                        guard !bId.isEmpty else { continue }
+
+                        var adamId: Int64? = nil
+                        var artworkUrl: String? = nil
+
+                        if let custom = userMappings[bId] { adamId = custom }
+
+                        if adamId == nil {
+                            for cat in activeCatalog {
+                                if cat.bundle_id == bId || (cat.bundle_ids?.contains(bId) == true) {
+                                    adamId = cat.adam_id
+                                    break
+                                }
+                            }
+                        }
+
+                        if adamId == nil {
+                            if let p = self.purchasedApps.first(where: { $0.bundleId == bId }) {
+                                adamId = p.adamId
+                                if artworkUrl == nil { artworkUrl = p.artworkUrl }
+                            }
+                        }
+
+                        discovered.append(DeviceInstalledApp(
+                            name: dispName.isEmpty ? bId : dispName,
+                            displayName: dispName.isEmpty ? bId : dispName,
+                            bundleId: bId,
+                            bundleVersion: bVer,
+                            adamId: adamId,
+                            artworkUrl: artworkUrl
+                        ))
+                    }
+                }
+            }
+
+            let coreScript = "\(Self.workDir)/ios_core.py"
+            if discovered.isEmpty && FileManager.default.isExecutableFile(atPath: coreScript) {
+                let (coreStatus, coreData) = Self.runProcessWithSafeOutput(executable: coreScript, arguments: ["apps"], timeout: 20.0)
+                if coreStatus == 0 && !coreData.isEmpty {
+                    if let list = try? JSONSerialization.jsonObject(with: coreData) as? [[String: Any]] {
                         for a in list {
                             let name = (a["name"] as? String) ?? ""
                             let bId = (a["bundleId"] as? String) ?? ""
@@ -958,7 +1519,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                 proc.arguments = args
                 let pipe = Pipe()
                 proc.standardOutput = pipe
-                proc.standardError = Pipe()
+                proc.standardError = pipe
 
                 if (try? proc.run()) != nil {
                     proc.waitUntilExit()
@@ -1011,6 +1572,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             DispatchQueue.main.async {
                 self.oldDeviceApps = sorted
                 self.isScanningApps = false
+                self.fetchArtworksForApps()
             }
 
             for app in sorted where app.adamId == nil {
@@ -1024,6 +1586,40 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                                 self.oldDeviceApps[idx].adamId = aid
                                 if let art = resolvedArt {
                                     self.oldDeviceApps[idx].artworkUrl = art
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public func fetchArtworksForApps() {
+        let appsNeedingArt = self.oldDeviceApps.filter { ($0.artworkUrl == nil || $0.artworkUrl?.isEmpty == true) && ($0.adamId != nil && $0.adamId! > 0) }
+        guard !appsNeedingArt.isEmpty else { return }
+
+        Task {
+            let idChunks = stride(from: 0, to: appsNeedingArt.count, by: 50).map {
+                Array(appsNeedingArt[$0..<min($0 + 50, appsNeedingArt.count)])
+            }
+
+            for chunk in idChunks {
+                let idList = chunk.compactMap { $0.adamId }.map { String($0) }.joined(separator: ",")
+                for country in ["ru", "us"] {
+                    guard let url = URL(string: "https://itunes.apple.com/lookup?id=\(idList)&country=\(country)") else { continue }
+                    var req = URLRequest(url: url, timeoutInterval: 5.0)
+                    req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                    if let (data, _) = try? await URLSession.shared.data(for: req),
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let results = json["results"] as? [[String: Any]] {
+                        DispatchQueue.main.async {
+                            for res in results {
+                                if let trackId = res["trackId"] as? Int64,
+                                   let art = (res["artworkUrl100"] as? String) ?? (res["artworkUrl60"] as? String) ?? (res["artworkUrl512"] as? String) {
+                                    if let idx = self.oldDeviceApps.firstIndex(where: { $0.adamId == trackId }) {
+                                        self.oldDeviceApps[idx].artworkUrl = art
+                                    }
                                 }
                             }
                         }
@@ -1961,32 +2557,70 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     }
 
 
-    public func installApp(ipaPath: String, bundleId: String = "") async -> (Bool, String) {
+    public func installApp(ipaPath: String, bundleId: String = "", udid: String = "") async -> (Bool, String) {
         let appFilename = URL(fileURLWithPath: ipaPath).lastPathComponent
-        LogManager.shared.log("🚀 Начало установки «\(appFilename)»...", level: "INSTALL")
-        LogManager.shared.log("🔒 Безопасный режим: Данные устройства, контакты, фото и другие приложения защищены.", level: "INSTALL")
-        appendLog("🚀 Установка «\(appFilename)»...")
-        appendLog("🔒 Безопасный режим: данные и другие приложения не затрагиваются")
+        LogManager.shared.log("🚀 Начало автономной установки «\(appFilename)»...", level: "INSTALL")
+        appendLog("🚀 Установка «\(appFilename)» на устройство...")
 
         DispatchQueue.main.async {
             self.operationProgress = 0.2
             self.operationStage = "Проверка пакета «\(appFilename)»..."
         }
 
-        if autoSignWithAppleId && isAppleIdAuthenticated && !bundleId.isEmpty {
-            DispatchQueue.main.async {
-                self.operationProgress = 0.4
-                self.operationStage = "Получение FairPlay-лицензии на \(self.activeAppleIdEmail)..."
-            }
-            appendLog("🔑 Запрос FairPlay-лицензии...")
-            _ = await purchaseAppLicense(bundleId: bundleId)
-        }
+        let iosBin = StandaloneToolchain.shared.iosBinaryPath
+        let targetUdid = !udid.isEmpty ? udid : (activeDevice?.udid ?? "")
 
-        DispatchQueue.main.async {
-            self.operationProgress = 0.6
-            self.operationStage = "Передача приложения на iPhone по прямому USB-каналу..."
+        if FileManager.default.isExecutableFile(atPath: iosBin) {
+            DispatchQueue.main.async {
+                self.operationProgress = 0.6
+                self.operationStage = "Прямая установка через go-ios (installation_proxy)..."
+            }
+            appendLog("📲 Передача приложения в системный сервис iOS...")
+
+            var args = ["install", "--path=\(ipaPath)"]
+            if !targetUdid.isEmpty {
+                args.append("--udid=\(targetUdid)")
+            }
+            
+            let onProgress: (String) -> Void = { str in
+                if let pStr = str.components(separatedBy: "%").first?.components(separatedBy: " ").last {
+                    let cleanPStr = pStr.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
+                    if let pct = Double(cleanPStr) {
+                        DispatchQueue.main.async {
+                            // Installation maps from 0.7 to 1.0 progress
+                            self.operationProgress = 0.7 + (pct / 100.0) * 0.3
+                            self.operationStage = "Установка... \(Int(pct))%"
+                        }
+                    }
+                }
+            }
+
+            let (status, data) = Self.runProcessWithLiveOutput(executable: iosBin, arguments: args, timeout: 600.0, onOutput: onProgress)
+            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            do {
+                let procTerminationStatus = status
+
+                DispatchQueue.main.async {
+                    self.operationProgress = 1.0
+                    self.operationStage = procTerminationStatus == 0 ? "Установка завершена успешно!" : "Ошибка установки"
+                }
+
+                if procTerminationStatus == 0 {
+                    LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через go-ios!", level: "INSTALL")
+                    appendLog("🎉 «\(appFilename)» успешно установлено на iPhone!")
+                    return (true, "Приложение успешно установлено на iPhone!")
+                } else {
+                    LogManager.shared.log("❌ Ошибка установки go-ios: \(output)", level: "INSTALL")
+                    appendLog("❌ Ошибка: \(output)")
+                    return (false, output.isEmpty ? "Ошибка установки" : output)
+                }
+            } catch {
+                LogManager.shared.log("❌ Ошибка запуска go-ios: \(error.localizedDescription)", level: "INSTALL")
+                appendLog("❌ Ошибка: \(error.localizedDescription)")
+                return (false, error.localizedDescription)
+            }
         }
-        appendLog("📲 Передача приложения на подключенный iPhone по прямому USB-каналу...")
 
         let coreScript = "\(Self.workDir)/ios_core.py"
         if FileManager.default.isExecutableFile(atPath: coreScript) {
@@ -1995,14 +2629,13 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             proc.arguments = ["install", ipaPath]
             let pipe = Pipe()
             proc.standardOutput = pipe
-            proc.standardError = Pipe()
+            proc.standardError = pipe
 
             if (try? proc.run()) != nil {
                 DispatchQueue.main.async {
                     self.operationProgress = 0.85
                     self.operationStage = "Установка и регистрация приложения на iOS..."
                 }
-                appendLog("⚙️ Регистрация в SpringBoard и системных службах iOS...")
                 proc.waitUntilExit()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -2025,47 +2658,31 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             }
         }
 
-        // Fallback to cfgutil
-        if FileManager.default.isExecutableFile(atPath: Self.cfgutilPath) {
-            appendLog("🔄 Установка через Apple Configurator helper...")
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: Self.cfgutilPath)
-            proc.arguments = ["install-app", ipaPath]
-            let pipe = Pipe()
-            proc.standardOutput = pipe
-            proc.standardError = pipe
-
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-                DispatchQueue.main.async {
-                    self.operationProgress = 1.0
-                    self.operationStage = proc.terminationStatus == 0 ? "Установка завершена успешно!" : "Ошибка установки"
-                }
-
-                if proc.terminationStatus == 0 {
-                    LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через cfgutil!", level: "INSTALL")
-                    appendLog("🎉 «\(appFilename)» успешно установлено!")
-                    return (true, str.isEmpty ? "Приложение успешно установлено на iPhone!" : str)
-                } else {
-                    LogManager.shared.log("❌ Ошибка cfgutil: \(str)", level: "INSTALL")
-                    appendLog("❌ Ошибка: \(str)")
-                    return (false, str.isEmpty ? "Ошибка установки через cfgutil" : str)
-                }
-            } catch {
-                LogManager.shared.log("❌ Ошибка запуска cfgutil: \(error.localizedDescription)", level: "INSTALL")
-                appendLog("❌ Ошибка: \(error.localizedDescription)")
-                return (false, error.localizedDescription)
-            }
-        }
-
         return (false, "Утилита установки не найдена")
     }
 
     public func uninstallApp(bundleId: String) async -> (Bool, String) {
+        let iosBin = StandaloneToolchain.shared.iosBinaryPath
+        let targetUdid = activeDevice?.udid ?? ""
+
+        if FileManager.default.isExecutableFile(atPath: iosBin) {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: iosBin)
+            var args = ["uninstall", bundleId]
+            if !targetUdid.isEmpty {
+                args.append("--udid=\(targetUdid)")
+            }
+            proc.arguments = args
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = pipe
+
+            if (try? proc.run()) != nil {
+                proc.waitUntilExit()
+                return (proc.terminationStatus == 0, "Приложение удалено")
+            }
+        }
+
         let coreScript = Self.workDir + "/ios_core.py"
         guard FileManager.default.fileExists(atPath: coreScript) else { return (false, "ios_core.py не найден") }
 
@@ -2074,7 +2691,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         proc.arguments = ["uninstall", bundleId]
         let pipe = Pipe()
         proc.standardOutput = pipe
-        proc.standardError = Pipe()
+        proc.standardError = pipe
 
         guard (try? proc.run()) != nil else { return (false, "Не удалось запустить удаление") }
         proc.waitUntilExit()
@@ -2088,246 +2705,318 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         return (proc.terminationStatus == 0, "Приложение удалено с устройства")
     }
 
+    public static let ipatoolPassphrase = "openrestore_passphrase_v1"
+
     public func downloadDirectAppStore(adamId: Int64, name: String) async -> (Bool, String, String?) {
-        let coreScript = Self.workDir + "/ios_core.py"
+        let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
         let outputDir = Self.libraryDir
         try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
 
         DispatchQueue.main.async {
-            self.operationProgress = 0.2
-            self.operationStage = "Прямая загрузка из App Store (CDN Apple)..."
+            self.operationProgress = 0.3
+            self.operationStage = "Прямая загрузка «\(name)» с серверов Apple..."
         }
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: coreScript)
-        proc.arguments = ["download_direct", String(adamId), outputDir]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
+        guard FileManager.default.isExecutableFile(atPath: ipatoolBin) else {
+            return (false, "Инструмент загрузки ipatool не найден", nil)
+        }
 
-        guard (try? proc.run()) != nil else { return (false, "Не удалось запустить загрузчик", nil) }
-        proc.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let success = dict["success"] as? Bool, success {
-            if let files = try? FileManager.default.contentsOfDirectory(atPath: outputDir) {
-                let match = files.first { $0.contains(String(adamId)) && $0.hasSuffix(".ipa") }
-                if let m = match {
-                    let fullPath = "\(outputDir)/\(m)"
-                    DispatchQueue.main.async {
-                        self.operationProgress = 1.0
-                        self.operationStage = "Загрузка завершена!"
-                    }
-                    return (true, "Загружено успешно", fullPath)
+        let onProgress: (String) -> Void = { str in
+            if let p = str.components(separatedBy: "%").first?.components(separatedBy: " ").last, let pct = Double(p) {
+                DispatchQueue.main.async {
+                    self.operationProgress = 0.3 + (pct / 100.0) * 0.4
+                    self.operationStage = "Загрузка... \(Int(pct))%"
                 }
+            }
+        }
+
+        // Try download directly (works for purchased/delisted apps)
+        var args = ["download", "--app-id", "\(adamId)", "-o", outputDir, "--format", "json", "--keychain-passphrase", Self.ipatoolPassphrase]
+        var (status, data) = Self.runProcessWithLiveOutput(executable: ipatoolBin, arguments: args, timeout: 1200.0, onOutput: onProgress)
+        var rawOut = String(data: data, encoding: .utf8) ?? ""
+
+        if status != 0 && (rawOut.contains("license") || rawOut.contains("purchase") || rawOut.contains("buy") || rawOut.contains("failed to get license") || rawOut.contains("purchased\":false")) {
+            args = ["download", "--app-id", "\(adamId)", "--purchase", "-o", outputDir, "--format", "json", "--keychain-passphrase", Self.ipatoolPassphrase]
+            (status, data) = Self.runProcessWithLiveOutput(executable: ipatoolBin, arguments: args, timeout: 1200.0, onOutput: onProgress)
+            rawOut = String(data: data, encoding: .utf8) ?? ""
+        }
+
+        if status == 0 {
+            let files = (try? FileManager.default.contentsOfDirectory(atPath: outputDir)) ?? []
+            let ipaFiles = files.filter { $0.hasSuffix(".ipa") }
+
+            var matchedFile: String? = ipaFiles.first { $0.contains(String(adamId)) }
+
+            if matchedFile == nil {
+                for line in rawOut.components(separatedBy: "\n") {
+                    if line.contains(".ipa") {
+                        for word in line.components(separatedBy: " ") {
+                            let cleanWord = word.trimmingCharacters(in: CharacterSet(charactersIn: "\"'\r\n[]"))
+                            if cleanWord.hasSuffix(".ipa") && FileManager.default.fileExists(atPath: cleanWord) {
+                                matchedFile = cleanWord
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+
+            if matchedFile == nil {
+                let sortedIPAs = ipaFiles.compactMap { f -> (String, Date)? in
+                    let p = "\(outputDir)/\(f)"
+                    guard let attr = try? FileManager.default.attributesOfItem(atPath: p),
+                          let mod = attr[.modificationDate] as? Date else { return nil }
+                    return (p, mod)
+                }.sorted { $0.1 > $1.1 }
+
+                if let newest = sortedIPAs.first, newest.1.timeIntervalSinceNow > -300 {
+                    matchedFile = newest.0
+                }
+            }
+
+            if let m = matchedFile {
+                let initialPath = m.hasPrefix("/") ? m : "\(outputDir)/\(m)"
+                let safeName = name.replacingOccurrences(of: "/", with: "_").trimmingCharacters(in: .whitespaces)
+                let standardizedTarget = "\(outputDir)/\(adamId)-\(safeName).ipa"
+
+                var finalPath = initialPath
+                if initialPath != standardizedTarget {
+                    try? FileManager.default.removeItem(atPath: standardizedTarget)
+                    if (try? FileManager.default.moveItem(atPath: initialPath, toPath: standardizedTarget)) != nil {
+                        finalPath = standardizedTarget
+                    }
+                }
+
+                DispatchQueue.main.async {
+                    self.operationProgress = 1.0
+                    self.operationStage = "Загрузка «\(name)» завершена!"
+                }
+                return (true, "Загружено успешно", finalPath)
             }
             return (true, "Загружено", nil)
         }
-        return (false, "Ошибка прямой загрузки App Store. Переключаюсь на метод Configurator...", nil)
+
+        var userFriendlyErr = rawOut
+        if rawOut.contains("failed to purchase") {
+            userFriendlyErr = "Приложение не привязано к данному Apple ID (лицензия не найдена)"
+        } else if rawOut.contains("item is unavailable") || rawOut.contains("temporarily unavailable") {
+            userFriendlyErr = "Приложение временно недоступно на серверах Apple"
+        } else if rawOut.contains("keyring") || rawOut.contains("account") {
+            return (false, "AUTH_REQUIRED: Сессия Apple ID устарела. Авторизуйтесь заново", nil)
+        }
+
+        return (false, userFriendlyErr.isEmpty ? "Ошибка прямой загрузки App Store" : userFriendlyErr, nil)
     }
 
     public func refreshAppleIdStatus() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
 
-            // 1. Try reading live signed in account from Apple Configurator UI menu
-            let scriptSource = """
-            tell application "System Events"
-                if exists (process "Apple Configurator") then
-                    tell process "Apple Configurator"
-                        try
-                            tell menu bar 1
-                                repeat with mi in menu bar items
-                                    if (name of mi is "Учетная запись" or name of mi is "Account") then
-                                        set firstItem to name of menu item 1 of menu 1 of mi
-                                        if firstItem does not contain "Sign In" and firstItem does not contain "Войти" and firstItem is not "missing value" and firstItem is not "" then
-                                            return "AUTH:" & firstItem
-                                        else
-                                            return "UNAUTH"
-                                        end if
-                                    end if
-                                end repeat
-                            end tell
-                        end try
-                    end tell
-                end if
-                return "UNKNOWN"
-            end tell
-            """
+            let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
+            var isDirectAuth = false
+            var directEmail = ""
+            var directName = ""
+            var directDsid = ""
 
-            var liveEmail: String? = nil
-            var isLiveAuth: Bool? = nil
+            if FileManager.default.isExecutableFile(atPath: ipatoolBin) {
+                let (status, data) = Self.runProcessWithSafeOutput(executable: ipatoolBin, arguments: ["auth", "info", "--format", "json", "--non-interactive", "--keychain-passphrase", Self.ipatoolPassphrase], timeout: 12.0)
+                let rawOut = String(data: data, encoding: .utf8) ?? ""
+                if status == 0 && !rawOut.contains("failed to get account") && !rawOut.contains("could not be found"),
+                   let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                    let email = (dict["email"] as? String) ?? (dict["apple_id"] as? String) ?? ""
+                    let name = (dict["name"] as? String) ?? email.components(separatedBy: "@").first ?? ""
+                    let dsidNum = dict["dsid"]
+                    let dsidStr = dsidNum != nil ? "\(dsidNum!)" : ""
 
-            var errInfo: NSDictionary?
-            if let appleScript = NSAppleScript(source: scriptSource) {
-                let desc = appleScript.executeAndReturnError(&errInfo)
-                let str = desc.stringValue ?? ""
-                if str.hasPrefix("AUTH:") {
-                    liveEmail = String(str.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    isLiveAuth = true
-                } else if str == "UNAUTH" {
-                    isLiveAuth = false
+                    if !email.isEmpty {
+                        isDirectAuth = true
+                        directEmail = email
+                        directName = name
+                        directDsid = dsidStr
+                    }
                 }
             }
 
-            // 2. Also check ownerDsid from store.sqlite
-            let dsid = self.getOwnerDsid() ?? ""
 
             DispatchQueue.main.async {
-                let prevEmail = self.activeAppleIdEmail
-                if let email = liveEmail, !email.isEmpty {
-                    self.activeAppleIdEmail = email
-                    self.activeAppleIdName = email.components(separatedBy: "@").first ?? email
+                self.isDirectAppleIdAuthenticated = isDirectAuth
+                if isDirectAuth {
+                    self.activeAppleIdEmail = directEmail
+                    self.activeAppleIdName = directName
+                    self.currentAccountDsid = directDsid
                     self.isAppleIdAuthenticated = true
-                    self.currentAccountDsid = dsid
-                    if prevEmail != email {
-                        LogManager.shared.log("✅ Обнаружен новый Apple ID в Apple Configurator: \(email)", level: "AUTH")
-                        self.refreshPurchasedApps()
-                    }
-                } else if isLiveAuth == false {
+                    UserDefaults.standard.set(true, forKey: "isDirectAppleIdAuthenticated")
+                    UserDefaults.standard.set(directEmail, forKey: "savedAppleIdEmail")
+                    UserDefaults.standard.set(directName, forKey: "savedAppleIdName")
+                    UserDefaults.standard.set(directDsid, forKey: "savedAppleIdDsid")
+                } else {
+                    self.isDirectAppleIdAuthenticated = false
                     self.isAppleIdAuthenticated = false
                     self.activeAppleIdEmail = ""
                     self.activeAppleIdName = ""
-                } else if !dsid.isEmpty {
-                    self.currentAccountDsid = dsid
-                    if self.activeAppleIdEmail.isEmpty {
-                        self.activeAppleIdEmail = "Apple ID (DSID: \(dsid))"
-                        self.activeAppleIdName = "Пользователь"
-                        self.isAppleIdAuthenticated = true
-                    }
+                    UserDefaults.standard.set(false, forKey: "isDirectAppleIdAuthenticated")
+                    UserDefaults.standard.removeObject(forKey: "savedAppleIdEmail")
+                    UserDefaults.standard.removeObject(forKey: "savedAppleIdName")
+                    UserDefaults.standard.removeObject(forKey: "savedAppleIdDsid")
                 }
             }
         }
     }
 
     public func openConfiguratorAccountDialog() {
+        openConfigurator()
+    }
+
+    public func loginAppleId(email: String, password: String, code: String? = nil) async -> (Bool, Bool, String) {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespaces)
+        guard !trimmedEmail.isEmpty, !password.isEmpty else {
+            return (false, false, "Введите email и пароль Apple ID")
+        }
+
+        let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
+        guard FileManager.default.isExecutableFile(atPath: ipatoolBin) else {
+            return (false, false, "Бинарник ipatool не найден: \(ipatoolBin)")
+        }
+
+        var args = ["auth", "login", "--email", trimmedEmail, "--password", password, "--non-interactive", "--keychain-passphrase", Self.ipatoolPassphrase]
+        if let c = code, !c.trimmingCharacters(in: .whitespaces).isEmpty {
+            args.append(contentsOf: ["--auth-code", c.trimmingCharacters(in: .whitespaces)])
+        }
+
+        // GrandSlam / Anisette initialization + 2FA challenge may take up to 45-60s on slower networks
+        let (loginStatus, data) = Self.runProcessWithSafeOutput(executable: ipatoolBin, arguments: args, timeout: 90.0)
+        let outStr = String(data: data, encoding: .utf8) ?? ""
+        let lower = outStr.lowercased()
+
+        // 1. Verify if user is truly logged in via ipatool auth info
+        let (infoStatus, infoData) = Self.runProcessWithSafeOutput(executable: ipatoolBin, arguments: ["auth", "info", "--format", "json", "--non-interactive", "--keychain-passphrase", Self.ipatoolPassphrase], timeout: 12.0)
+        var isReallyAuth = false
+        var directName = ""
+        var directDsid = ""
+
+        if infoStatus == 0,
+           let dict = (try? JSONSerialization.jsonObject(with: infoData)) as? [String: Any] {
+            let authEmail = (dict["email"] as? String) ?? (dict["apple_id"] as? String) ?? ""
+            if !authEmail.isEmpty {
+                isReallyAuth = true
+                directName = (dict["name"] as? String) ?? authEmail.components(separatedBy: "@").first ?? ""
+                let dsidNum = dict["dsid"]
+                directDsid = dsidNum != nil ? "\(dsidNum!)" : ""
+            }
+        }
+
+        if isReallyAuth && loginStatus == 0 {
+            DispatchQueue.main.async {
+                self.isDirectAppleIdAuthenticated = true
+                self.isAppleIdAuthenticated = true
+                self.activeAppleIdEmail = trimmedEmail
+                self.activeAppleIdName = directName
+                self.currentAccountDsid = directDsid
+                UserDefaults.standard.set(true, forKey: "isDirectAppleIdAuthenticated")
+                UserDefaults.standard.set(trimmedEmail, forKey: "savedAppleIdEmail")
+                UserDefaults.standard.set(directName, forKey: "savedAppleIdName")
+                UserDefaults.standard.set(directDsid, forKey: "savedAppleIdDsid")
+            }
+            self.refreshPurchasedApps()
+            return (true, false, "Вход выполнен успешно!")
+        }
+
+        // 2. Check for Wrong Password / Invalid Account / Disabled Account (Do NOT show 2FA input!)
+        if lower.contains("account is disabled") || lower.contains("invalid credentials") ||
+           lower.contains("password is incorrect") || lower.contains("bad credentials") ||
+           lower.contains("authentication failed") || lower.contains("bad login") ||
+           lower.contains("passwordexpired") || lower.contains("unauthorized") {
+            return (false, false, "Неверный логин или пароль Apple ID. Проверьте правильность и повторите попытку.")
+        }
+
+        // 3. Check for 2FA Code Required or 2FA Error
+        let is2FARequiredMatch = lower.contains("2fa") || lower.contains("code") || lower.contains("verification") ||
+                                 lower.contains("auth-code") || lower.contains("auth_code") || lower.contains("challenge") ||
+                                 lower.contains("second factor") || lower.contains("second-factor") ||
+                                 lower.contains("two-factor") || lower.contains("two_factor") ||
+                                 lower.contains("security code") || lower.contains("passcode") ||
+                                 lower.contains("trusted device") || lower.contains("enter code") || lower.contains("sms")
+
+        if is2FARequiredMatch {
+            if code != nil && !code!.trimmingCharacters(in: .whitespaces).isEmpty {
+                return (false, true, "Неверный проверочный код 2FA. Нажмите «Запросить новый код», если код устарел.")
+            }
+            return (false, true, "Код подтверждения отправлен на ваши устройства Apple. Введите 6-значный код 2FA.")
+        }
+
+        // 4. Fallback: If no code entered yet, prompt 2FA
+        if code == nil || code?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            return (false, true, "Код подтверждения отправлен на ваши устройства Apple. Введите 6-значный код 2FA.")
+        }
+
+        let cleanErr = outStr.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        return (false, false, cleanErr.isEmpty ? "Ошибка входа в Apple ID. Проверьте правильность введенных данных." : cleanErr)
+    }
+
+    public func logoutAppleId() async -> Bool {
+        let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
+        if FileManager.default.isExecutableFile(atPath: ipatoolBin) {
+            _ = Self.runProcessWithSafeOutput(executable: ipatoolBin, arguments: ["auth", "revoke", "--non-interactive", "--keychain-passphrase", Self.ipatoolPassphrase], timeout: 12.0)
+        }
+        try? FileManager.default.removeItem(atPath: Self.purchasesCachePath)
         DispatchQueue.main.async {
             self.isAppleIdAuthenticated = false
+            self.isDirectAppleIdAuthenticated = false
             self.activeAppleIdEmail = ""
             self.activeAppleIdName = ""
             self.currentAccountDsid = ""
             self.purchasedApps = []
+            self.totalPurchasedAppsCount = 0
+            UserDefaults.standard.removeObject(forKey: "isDirectAppleIdAuthenticated")
+            UserDefaults.standard.removeObject(forKey: "savedAppleIdEmail")
+            UserDefaults.standard.removeObject(forKey: "savedAppleIdName")
+            UserDefaults.standard.removeObject(forKey: "savedAppleIdDsid")
         }
-
-        openConfigurator()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            let scriptSource = """
-            tell application "Apple Configurator" to activate
-            tell application "System Events"
-                tell process "Apple Configurator"
-                    try
-                        tell menu bar 1
-                            repeat with mi in menu bar items
-                                if (name of mi is "Учетная запись" or name of mi is "Account") then
-                                    if (exists menu item "Sign Out…" of menu 1 of mi) then
-                                        click menu item "Sign Out…" of menu 1 of mi
-                                        delay 0.8
-                                    else if (exists menu item "Выйти…" of menu 1 of mi) then
-                                        click menu item "Выйти…" of menu 1 of mi
-                                        delay 0.8
-                                    end if
-
-                                    if (exists menu item "Sign In…" of menu 1 of mi) then
-                                        click menu item "Sign In…" of menu 1 of mi
-                                    else if (exists menu item "Войти…" of menu 1 of mi) then
-                                        click menu item "Войти…" of menu 1 of mi
-                                    else
-                                        click menu item 1 of menu 1 of mi
-                                    end if
-                                    exit repeat
-                                end if
-                            end repeat
-                        end tell
-                    end try
-                end tell
-            end tell
-            """
-            var errInfo: NSDictionary?
-            let script = NSAppleScript(source: scriptSource)
-            _ = script?.executeAndReturnError(&errInfo)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                self.refreshPurchasedApps()
-                self.refreshAppleIdStatus()
-            }
-        }
-    }
-
-    public func loginAppleId(email: String, password: String, code: String? = nil) async -> (Bool, Bool, String) {
-        let coreScript = Self.workDir + "/ios_core.py"
-        guard FileManager.default.fileExists(atPath: coreScript) else {
-            return (false, false, "ios_core.py не найден")
-        }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: coreScript)
-        var args = ["auth_login", email, password]
-        if let c = code, !c.trimmingCharacters(in: .whitespaces).isEmpty {
-            args.append(c.trimmingCharacters(in: .whitespaces))
-        }
-        proc.arguments = args
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-
-        guard (try? proc.run()) != nil else {
-            return (false, false, "Не удалось запустить процесс входа")
-        }
-        proc.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let success = (dict["success"] as? Bool) ?? false
-            let req2FA = (dict["requires_2fa"] as? Bool) ?? false
-            let msg = (dict["message"] as? String) ?? (dict["error"] as? String) ?? ""
-
-            if success {
-                self.refreshAppleIdStatus()
-            }
-            return (success, req2FA, msg)
-        }
-        return (false, false, "Неизвестный ответ от сервера аутентификации")
-    }
-
-    public func logoutAppleId() async -> Bool {
-        let coreScript = Self.workDir + "/ios_core.py"
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: coreScript)
-        proc.arguments = ["auth_revoke"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-
-        guard (try? proc.run()) != nil else { return false }
-        proc.waitUntilExit()
-
-        DispatchQueue.main.async {
-            self.isAppleIdAuthenticated = false
-            self.activeAppleIdName = ""
-            self.activeAppleIdEmail = ""
-        }
-        return proc.terminationStatus == 0
+        return true
     }
 
     public func purchaseAppLicense(bundleId: String) async -> (Bool, String) {
-        let coreScript = Self.workDir + "/ios_core.py"
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: coreScript)
-        proc.arguments = ["purchase", bundleId]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
+        let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
+        if FileManager.default.isExecutableFile(atPath: ipatoolBin) {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: ipatoolBin)
+            proc.arguments = ["purchase", "-b", bundleId]
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = pipe
 
-        guard (try? proc.run()) != nil else { return (false, "Ошибка запуска purchase") }
-        proc.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let success = dict["success"] as? Bool {
-            let msg = (dict["message"] as? String) ?? (dict["error"] as? String) ?? ""
-            return (success, msg)
+            if (try? proc.run()) != nil {
+                proc.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let out = String(data: data, encoding: .utf8) ?? ""
+                if proc.terminationStatus == 0 {
+                    return (true, "Лицензия успешно получена")
+                } else if !out.isEmpty {
+                    return (false, out)
+                }
+            }
         }
+
+        let coreScript = Self.workDir + "/ios_core.py"
+        if FileManager.default.fileExists(atPath: coreScript) {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: coreScript)
+            proc.arguments = ["purchase", bundleId]
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = pipe
+
+            if (try? proc.run()) != nil {
+                proc.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let success = dict["success"] as? Bool {
+                    let msg = (dict["message"] as? String) ?? (dict["error"] as? String) ?? ""
+                    return (success, msg)
+                }
+            }
+        }
+
         return (false, "Не удалось получить лицензию")
     }
 
@@ -2357,7 +3046,8 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     // MARK: - Software Updates Engine
 
     @MainActor
-    public func checkForUpdates(currentVersion: String = "1.5.0") async -> (AppUpdateInfo?, String?) {
+    public func checkForUpdates(currentVersion: String? = nil) async -> (AppUpdateInfo?, String?) {
+        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0")
         self.isCheckingUpdates = true
         self.updateCheckError = nil
 
@@ -2426,7 +3116,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             }
 
             let cleanTag = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
-            let cleanCurrent = currentVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+            let cleanCurrent = actualVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
 
             let isNewer = cleanTag.compare(cleanCurrent, options: .numeric) == .orderedDescending
 

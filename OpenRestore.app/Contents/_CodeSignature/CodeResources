@@ -8,9 +8,21 @@
 		<data>
 		s3OGtc3ZQe7Bx/8XDbKqiyPGJn4=
 		</data>
+		<key>Resources/bin/ios</key>
+		<data>
+		PtT+Bab9OxPoqpl0SmzwqeGd+kI=
+		</data>
+		<key>Resources/bin/ios-scanner</key>
+		<data>
+		t+jNxrIMiK2FXsEO0Czr0qIYRe4=
+		</data>
+		<key>Resources/bin/ipatool</key>
+		<data>
+		OCP0w1QyKNN3ziNwsuOosIBJ4lI=
+		</data>
 		<key>Resources/catalog.json</key>
 		<data>
-		dIwf02oWGO5Y+7kx06PpqosTinA=
+		aL5MsqF5UaPT0CeU9g8T4QQGXWA=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -22,11 +34,32 @@
 			3qzzMJ/+CgI64QKYa1gO6vXp2pH3abaUeFM7PxT0iII=
 			</data>
 		</dict>
+		<key>Resources/bin/ios</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FYGD+Tte8XAVD7/g6ab24pXhFLNaCAMqIsFeshTmvP4=
+			</data>
+		</dict>
+		<key>Resources/bin/ios-scanner</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Xoyxr41faWA6S8MMHROMVkCBnvMauYhyumKNXjNpSxU=
+			</data>
+		</dict>
+		<key>Resources/bin/ipatool</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			88zT3xCcX8oYczwUGtcE8sWx9R27FihWUFmlcGIZhxM=
+			</data>
+		</dict>
 		<key>Resources/catalog.json</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			PLucXL3FpudebT3RtKS4xUxP0yKGlKbwGdu0AYpgBgk=
+			IId1iBx3irIFXB4nwWMfDKfDmKqgjKf7IKLcpuNq+Qk=
 			</data>
 		</dict>
 	</dict>
