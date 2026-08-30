@@ -76,6 +76,12 @@ public final class StandaloneToolchain: @unchecked Sendable {
             }
             if FileManager.default.fileExists(atPath: destPath) {
                 chmod(destPath, 0o755)
+                // Clear any Gatekeeper quarantine attributes on extracted helper tools
+                let xattrProc = Process()
+                xattrProc.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                xattrProc.arguments = ["-cr", destPath]
+                try? xattrProc.run()
+                xattrProc.waitUntilExit()
             }
         }
     }
@@ -1202,8 +1208,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
     public func getConnectedDevicesDetails(currentKnown: [DeviceInfo] = []) -> [DeviceInfo] {
         let iosBin = StandaloneToolchain.shared.iosBinaryPath
+        var discoveredMap: [String: DeviceInfo] = [:]
+
+        // LAYER 1: ios list --details (fast go-ios lockdown query)
         if FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 15.0)
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0)
             if status == 0 && !data.isEmpty {
                 var jsonDict: [String: Any]? = nil
                 if let directDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1218,8 +1227,6 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                 }
 
                 if let deviceList = jsonDict?["deviceList"] as? [[String: Any]], !deviceList.isEmpty {
-                    var devMap: [String: DeviceInfo] = [:]
-
                     for d in deviceList {
                         let udid = (d["Udid"] as? String) ?? ""
                         guard !udid.isEmpty else { continue }
@@ -1229,26 +1236,21 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         let rawConn = (d["ConnectionType"] as? String) ?? "USB"
                         let connType: DeviceConnectionType = (rawConn.lowercased().contains("net") || rawConn.lowercased().contains("wi")) ? .wifi : .usb
 
-                        var devName = "iPhone"
+                        let marketingName = Self.mapMarketingName(productType, modelNumber: "")
+                        let fallbackName = marketingName.isEmpty ? "iPhone" : marketingName
+
+                        var devName = fallbackName
                         if let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty, known.name != "iPhone" {
                             devName = known.name
-                        } else {
-                            let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(udid)"], timeout: 8.0)
-                            if nameStatus == 0,
-                               let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
-                               let fetched = nameJson["devicename"] as? String, !fetched.isEmpty {
-                                devName = fetched
-                            }
                         }
 
-                        let marketingName = Self.mapMarketingName(productType, modelNumber: "")
                         let iosVersion = productVer.isEmpty ? "iOS" : (productVer.starts(with: "iOS") ? productVer : "iOS \(productVer)")
 
                         let newDev = DeviceInfo(
                             name: devName,
                             ownerName: Self.extractOwnerName(from: devName),
                             modelIdentifier: productType,
-                            marketingName: marketingName,
+                            marketingName: marketingName.isEmpty ? "iPhone" : marketingName,
                             iosVersion: iosVersion,
                             diskCapacity: "",
                             battery: "",
@@ -1261,87 +1263,134 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                             lastSeen: Date()
                         )
 
-                        if let existing = devMap[udid] {
+                        if let existing = discoveredMap[udid] {
                             if existing.connectionType != .usb && connType == .usb {
-                                devMap[udid] = newDev
+                                discoveredMap[udid] = newDev
                             }
                         } else {
-                            devMap[udid] = newDev
+                            discoveredMap[udid] = newDev
                         }
                     }
-
-                    let results = Array(devMap.values)
-                    if !results.isEmpty { return results }
                 }
             }
         }
 
-        let coreScript = Self.workDir + "/ios_core.py"
-        guard FileManager.default.fileExists(atPath: coreScript) else { return [] }
-
-        let (coreStatus, coreData) = Self.runProcessWithSafeOutput(executable: coreScript, arguments: ["devinfo_all"], timeout: 8.0)
-        guard coreStatus == 0 && !coreData.isEmpty else { return [] }
-
-        var rawList: [[String: Any]] = []
-        if let arr = try? JSONSerialization.jsonObject(with: coreData) as? [[String: Any]] {
-            rawList = arr
-        } else if let dict = try? JSONSerialization.jsonObject(with: coreData) as? [String: Any], !dict.isEmpty {
-            rawList = [dict]
-        }
-
-        var result: [DeviceInfo] = []
-
-        for dict in rawList {
-            guard let productType = dict["ProductType"] as? String, !productType.isEmpty else { continue }
-
-            let name = (dict["DeviceName"] as? String) ?? "iPhone"
-            let productVersion = (dict["ProductVersion"] as? String) ?? ""
-            let udid = (dict["UniqueDeviceID"] as? String) ?? ""
-            let modelNum = (dict["RegulatoryModelNumber"] as? String) ?? (dict["ModelNumber"] as? String) ?? ""
-            let givenMarketing = (dict["MarketingName"] as? String) ?? ""
-            let marketingName = !givenMarketing.isEmpty ? givenMarketing : Self.mapMarketingName(productType, modelNumber: modelNum)
-            let connStr = (dict["ConnectionType"] as? String) ?? "USB"
-            let connType: DeviceConnectionType = (connStr.lowercased().contains("wi") || connStr.lowercased().contains("net")) ? .wifi : .usb
-
-            var diskStr = ""
-            if let totalBytes = dict["TotalDiskCapacity"] as? Int {
-                let gb = Int(round(Double(totalBytes) / 1_000_000_000.0))
-                var freeStr = ""
-                if let freeBytes = dict["AvailableDiskCapacity"] as? Int {
-                    let freeGb = Double(freeBytes) / 1_073_741_824.0
-                    freeStr = String(format: " (свободно %.0f ГБ)", freeGb)
+        // LAYER 2: Fallback to simple `ios list` (returns raw list of UDIDs) if Layer 1 was empty
+        if discoveredMap.isEmpty && FileManager.default.isExecutableFile(atPath: iosBin) {
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list"], timeout: 4.0)
+            if status == 0 && !data.isEmpty {
+                var udidList: [String] = []
+                if let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                   let list = dict["deviceList"] as? [String] {
+                    udidList = list
+                } else if let arr = (try? JSONSerialization.jsonObject(with: data)) as? [String] {
+                    udidList = arr
                 }
-                diskStr = "\(gb) ГБ\(freeStr)"
+
+                for udid in udidList where !udid.isEmpty {
+                    var devName = "iPhone"
+                    var mName = "iPhone"
+                    var mId = "iPhone"
+                    var iVer = "iOS"
+                    if let known = currentKnown.first(where: { $0.udid == udid }) {
+                        devName = known.name
+                        mName = known.marketingName
+                        mId = known.modelIdentifier
+                        iVer = known.iosVersion
+                    }
+
+                    discoveredMap[udid] = DeviceInfo(
+                        name: devName,
+                        ownerName: Self.extractOwnerName(from: devName),
+                        modelIdentifier: mId,
+                        marketingName: mName,
+                        iosVersion: iVer,
+                        udid: udid,
+                        connectionType: .usb,
+                        isOnline: true,
+                        lastSeen: Date()
+                    )
+                }
             }
-
-            var battStr = ""
-            if let bat = dict["BatteryCurrentCapacity"] as? Int {
-                battStr = "\(bat)%"
-            }
-
-            let serial = (dict["SerialNumber"] as? String) ?? ""
-            let wifi = (dict["WiFiAddress"] as? String) ?? ""
-
-            let dev = DeviceInfo(
-                name: name,
-                ownerName: Self.extractOwnerName(from: name),
-                modelIdentifier: productType,
-                marketingName: marketingName,
-                iosVersion: productVersion.isEmpty ? "iOS" : (productVersion.starts(with: "iOS") ? productVersion : "iOS \(productVersion)"),
-                diskCapacity: diskStr,
-                battery: battStr,
-                udid: udid,
-                ecid: "",
-                serialNumber: serial,
-                wifiAddress: wifi,
-                connectionType: connType,
-                isOnline: true,
-                lastSeen: Date()
-            )
-            result.append(dev)
         }
 
-        return result
+        // LAYER 3: Native macOS ioreg fallback for physical USB-connected iOS devices
+        if discoveredMap.isEmpty {
+            let (ioregStatus, ioregData) = Self.runProcessWithSafeOutput(executable: "/usr/sbin/ioreg", arguments: ["-p", "IOUSB", "-l", "-w", "0"], timeout: 3.0)
+            if ioregStatus == 0, let ioregStr = String(data: ioregData, encoding: .utf8) {
+                let lines = ioregStr.components(separatedBy: "\n")
+                var currentProd = ""
+                for line in lines {
+                    if line.contains("\"kUSBProductString\"") {
+                        if line.contains("iPhone") { currentProd = "iPhone" }
+                        else if line.contains("iPad") { currentProd = "iPad" }
+                        else { currentProd = "" }
+                    }
+                    if !currentProd.isEmpty && line.contains("\"kUSBSerialNumberString\"") {
+                        let parts = line.components(separatedBy: "=")
+                        if parts.count > 1 {
+                            let rawSerial = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"\r\n\t"))
+                            if !rawSerial.isEmpty && rawSerial.count >= 16 {
+                                var formattedUdid = rawSerial
+                                if formattedUdid.count == 24 && !formattedUdid.contains("-") {
+                                    let prefix = String(formattedUdid.prefix(8))
+                                    let suffix = String(formattedUdid.suffix(16))
+                                    formattedUdid = "\(prefix)-\(suffix)"
+                                }
+
+                                var devName = currentProd
+                                var mName = currentProd
+                                if let known = currentKnown.first(where: { $0.udid == formattedUdid || $0.udid == rawSerial }) {
+                                    devName = known.name
+                                    mName = known.marketingName
+                                }
+
+                                discoveredMap[formattedUdid] = DeviceInfo(
+                                    name: devName,
+                                    ownerName: Self.extractOwnerName(from: devName),
+                                    modelIdentifier: currentProd,
+                                    marketingName: mName,
+                                    iosVersion: "iOS",
+                                    udid: formattedUdid,
+                                    connectionType: .usb,
+                                    isOnline: true,
+                                    lastSeen: Date()
+                                )
+                            }
+                        }
+                        currentProd = ""
+                    }
+                }
+            }
+        }
+
+        // Asynchronously enrich friendly device names for devices that just say "iPhone" or "iPad"
+        let devicesToEnrich = Array(discoveredMap.values)
+        if FileManager.default.isExecutableFile(atPath: iosBin) {
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self = self else { return }
+                for dev in devicesToEnrich where dev.name == "iPhone" || dev.name == "iPad" {
+                    let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(dev.udid)"], timeout: 4.0)
+                    if nameStatus == 0,
+                       let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
+                       let fetched = nameJson["devicename"] as? String, !fetched.isEmpty, fetched != "iPhone" && fetched != "iPad" {
+                        DispatchQueue.main.async {
+                            if let idx = self.connectedDevices.firstIndex(where: { $0.udid == dev.udid }) {
+                                self.connectedDevices[idx].name = fetched
+                                self.connectedDevices[idx].ownerName = Self.extractOwnerName(from: fetched)
+                            }
+                            if let kIdx = self.knownDevices.firstIndex(where: { $0.udid == dev.udid }) {
+                                self.knownDevices[kIdx].name = fetched
+                                self.knownDevices[kIdx].ownerName = Self.extractOwnerName(from: fetched)
+                                self.saveKnownDevices()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return Array(discoveredMap.values)
     }
 
     public var catalogCache: [AppItem] = []
