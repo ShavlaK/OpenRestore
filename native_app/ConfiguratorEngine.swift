@@ -678,7 +678,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                     if d1.connectionType != .usb && d2.connectionType == .usb { return false }
                     return d1.name < d2.name
                 }
-                self.connectedDevices = sortedOnline
+                DispatchQueue.main.async { self.connectedDevices = sortedOnline }
 
                 var updatedKnown = self.knownDevices
                 if updatedKnown.isEmpty {
@@ -716,7 +716,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                     }
                 }
 
-                self.knownDevices = updatedKnown
+                DispatchQueue.main.async { self.knownDevices = updatedKnown }
                 self.saveKnownDevices()
 
                 // Selection Logic:
@@ -771,14 +771,14 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                     let cached = self.loadCachedPurchases()
                     if !cached.isEmpty {
                         DispatchQueue.main.async {
-                            self.purchasedApps = cached
-                            self.totalPurchasedAppsCount = cached.count
+                            DispatchQueue.main.async { self.purchasedApps = cached }
+                            DispatchQueue.main.async { self.totalPurchasedAppsCount = cached.count }
                         }
                     }
                 }
                 
                 DispatchQueue.main.async {
-                    self.isLoadingPurchasedApps = true
+                    DispatchQueue.main.async { self.isLoadingPurchasedApps = true }
                 }
                 
                 let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
@@ -838,8 +838,8 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                         let currentBatch = finalApps
                         let currentTotal = totalCount
                         DispatchQueue.main.async {
-                            self.purchasedApps = currentBatch
-                            self.totalPurchasedAppsCount = currentTotal > 0 ? currentTotal : currentBatch.count
+                            DispatchQueue.main.async { self.purchasedApps = currentBatch }
+                            DispatchQueue.main.async { self.totalPurchasedAppsCount = currentTotal > 0 ? currentTotal : currentBatch.count }
                             
                             // Automatically enrich any scanned oldDeviceApps that were missing adamId
                             for i in 0..<self.oldDeviceApps.count {
@@ -872,17 +872,17 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
                 }
                 
                 DispatchQueue.main.async {
-                    self.isLoadingPurchasedApps = false
+                    DispatchQueue.main.async { self.isLoadingPurchasedApps = false }
                 }
             } else {
                 let finalApps = self.loadPurchasedAppsFromDB()
                 let finalDsid = self.getOwnerDsid() ?? ""
                 
                 DispatchQueue.main.async {
-                    self.purchasedApps = finalApps
-                    self.totalPurchasedAppsCount = finalApps.count
+                    DispatchQueue.main.async { self.purchasedApps = finalApps }
+                    DispatchQueue.main.async { self.totalPurchasedAppsCount = finalApps.count }
                     if !finalDsid.isEmpty { 
-                        self.currentAccountDsid = finalDsid 
+                        DispatchQueue.main.async { self.currentAccountDsid = finalDsid  }
                     }
 
                     // Automatically enrich any scanned oldDeviceApps that were missing adamId
@@ -1935,7 +1935,8 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
     public func executeConfiguratorAutomation(adamId: Int64, appName: String = "") {
         if !isAccessibilityGranted {
-            LogManager.shared.log("⚠️ Внимание: Для автоматических кликов в Apple Configurator требуется выдать доступ в «Системные настройки → Конфиденциальность → Универсальный доступ» для OpenRestore.", level: "AUTO")
+            LogManager.shared.log("⚠️ Внимание: Для автоматических кликов требуется выдать доступ в «Системные настройки → Конфиденциальность → Универсальный доступ» для OpenRestore.", level: "AUTO")
+            return // Skip AppleScript execution to avoid errors
         }
         
         let targetTag = "Restore request \(adamId)"
@@ -2922,21 +2923,21 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
 
             DispatchQueue.main.async {
-                self.isDirectAppleIdAuthenticated = isDirectAuth
+                DispatchQueue.main.async { self.isDirectAppleIdAuthenticated = isDirectAuth }
                 if isDirectAuth {
-                    self.activeAppleIdEmail = directEmail
-                    self.activeAppleIdName = directName
-                    self.currentAccountDsid = directDsid
-                    self.isAppleIdAuthenticated = true
+                    DispatchQueue.main.async { self.activeAppleIdEmail = directEmail }
+                    DispatchQueue.main.async { self.activeAppleIdName = directName }
+                    DispatchQueue.main.async { self.currentAccountDsid = directDsid }
+                    DispatchQueue.main.async { self.isAppleIdAuthenticated = true }
                     UserDefaults.standard.set(true, forKey: "isDirectAppleIdAuthenticated")
                     UserDefaults.standard.set(directEmail, forKey: "savedAppleIdEmail")
                     UserDefaults.standard.set(directName, forKey: "savedAppleIdName")
                     UserDefaults.standard.set(directDsid, forKey: "savedAppleIdDsid")
                 } else {
-                    self.isDirectAppleIdAuthenticated = false
-                    self.isAppleIdAuthenticated = false
-                    self.activeAppleIdEmail = ""
-                    self.activeAppleIdName = ""
+                    DispatchQueue.main.async { self.isDirectAppleIdAuthenticated = false }
+                    DispatchQueue.main.async { self.isAppleIdAuthenticated = false }
+                    DispatchQueue.main.async { self.activeAppleIdEmail = "" }
+                    DispatchQueue.main.async { self.activeAppleIdName = "" }
                     UserDefaults.standard.set(false, forKey: "isDirectAppleIdAuthenticated")
                     UserDefaults.standard.removeObject(forKey: "savedAppleIdEmail")
                     UserDefaults.standard.removeObject(forKey: "savedAppleIdName")
@@ -2990,11 +2991,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         if isReallyAuth && loginStatus == 0 {
             DispatchQueue.main.async {
-                self.isDirectAppleIdAuthenticated = true
-                self.isAppleIdAuthenticated = true
-                self.activeAppleIdEmail = trimmedEmail
-                self.activeAppleIdName = directName
-                self.currentAccountDsid = directDsid
+                DispatchQueue.main.async { self.isDirectAppleIdAuthenticated = true }
+                DispatchQueue.main.async { self.isAppleIdAuthenticated = true }
+                DispatchQueue.main.async { self.activeAppleIdEmail = trimmedEmail }
+                DispatchQueue.main.async { self.activeAppleIdName = directName }
+                DispatchQueue.main.async { self.currentAccountDsid = directDsid }
                 UserDefaults.standard.set(true, forKey: "isDirectAppleIdAuthenticated")
                 UserDefaults.standard.set(trimmedEmail, forKey: "savedAppleIdEmail")
                 UserDefaults.standard.set(directName, forKey: "savedAppleIdName")
@@ -3043,13 +3044,13 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         }
         try? FileManager.default.removeItem(atPath: Self.purchasesCachePath)
         DispatchQueue.main.async {
-            self.isAppleIdAuthenticated = false
-            self.isDirectAppleIdAuthenticated = false
-            self.activeAppleIdEmail = ""
-            self.activeAppleIdName = ""
-            self.currentAccountDsid = ""
-            self.purchasedApps = []
-            self.totalPurchasedAppsCount = 0
+            DispatchQueue.main.async { self.isAppleIdAuthenticated = false }
+            DispatchQueue.main.async { self.isDirectAppleIdAuthenticated = false }
+            DispatchQueue.main.async { self.activeAppleIdEmail = "" }
+            DispatchQueue.main.async { self.activeAppleIdName = "" }
+            DispatchQueue.main.async { self.currentAccountDsid = "" }
+            DispatchQueue.main.async { self.purchasedApps = [] }
+            DispatchQueue.main.async { self.totalPurchasedAppsCount = 0 }
             UserDefaults.standard.removeObject(forKey: "isDirectAppleIdAuthenticated")
             UserDefaults.standard.removeObject(forKey: "savedAppleIdEmail")
             UserDefaults.standard.removeObject(forKey: "savedAppleIdName")

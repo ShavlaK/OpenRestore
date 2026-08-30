@@ -798,7 +798,7 @@ struct ContentView: View {
                     Text(app.displayName.isEmpty ? app.name : app.displayName)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.primary)
-                        .lineLimit(1)
+                                .lineLimit(3)
 
                     if !app.bundleVersion.isEmpty {
                         Text(app.bundleVersion)
@@ -1007,7 +1007,7 @@ struct ContentView: View {
                 Text(item.name)
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.primary)
-                    .lineLimit(1)
+                .lineLimit(3)
 
                 HStack(spacing: 4) {
                     Text(item.bundleId)
@@ -1320,7 +1320,7 @@ struct ContentView: View {
                     Text(item.displayName)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.primary)
-                        .lineLimit(1)
+                        .lineLimit(3)
 
                     if !item.version.isEmpty {
                         Text(item.version)
@@ -1576,7 +1576,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
 
-                        if currentEngineMode == .configurator {
+                                                if currentEngineMode == .configurator {
                             Divider().padding(.vertical, 4)
 
                             Toggle(isOn: $autoClickConfigurator) {
@@ -1587,6 +1587,28 @@ struct ContentView: View {
                                         .font(.system(size: 11))
                                         .foregroundColor(.secondary)
                                 }
+                            }
+                            
+                            if autoClickConfigurator && !engine.isAccessibilityGranted {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("⚠️ Требуется разрешение")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.red)
+                                    Text("Для автоматических кликов нужно разрешить управление компьютером.")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    Button("Разрешить в Системных настройках") {
+                                        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                                        AXIsProcessTrustedWithOptions(options as CFDictionary)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.red)
+                                    .controlSize(.mini)
+                                }
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(8)
                             }
                         }
                     }
@@ -2320,7 +2342,7 @@ struct ContentView: View {
                     HStack {
                         Text(engine.operationStage.isEmpty ? engine.currentStatus : engine.operationStage)
                             .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
+                        .lineLimit(4)
                         Spacer()
                         Text("\(Int(round(engine.operationProgress * 100)))%")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -2980,13 +3002,13 @@ struct ContentView: View {
                         self.showAppleIdSheet = true
                     }
                     return
-                } else {
-                    engine.appendLog("❌ Ошибка загрузки: \(msg)")
+                                } else {
+                    engine.appendLog("⚠️ Прямая загрузка не удалась: \(msg)")
+                    engine.appendLog("🔄 Автоматический переход в резервный режим Apple Configurator...")
                     DispatchQueue.main.async {
-                        self.restoreError = msg
-                        self.engine.operationStage = "Ошибка: \(msg)"
+                        self.engine.operationStage = "Переход в Apple Configurator..."
                     }
-                    return
+                    // Fallthrough to Configurator mode
                 }
             }
 
