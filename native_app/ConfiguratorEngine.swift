@@ -395,6 +395,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     @Published public var isLoadingPurchasedApps: Bool = false
     @Published public var totalPurchasedAppsCount: Int = 0
     private var isRefreshingPurchasesInProgress = false
+    private var isRefreshingDevicesInProgress = false
     @Published public var oldDeviceApps: [DeviceInstalledApp] = []
     @Published public var currentAccountDsid: String = ""
     @Published public var isRunning: Bool = false
@@ -429,10 +430,16 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         LogManager.shared.log("OpenRestore Engine инициализирован. Библиотека: \(Self.libraryDir)", level: "INIT")
         cleanAllRestoreRequests()
 
-        self.refreshAppleIdStatus()
-        refreshDevices()
-        refreshPurchasedApps()
-        startDevicePolling()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.refreshAppleIdStatus()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            self.refreshDevices()
+            self.startDevicePolling()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            self.refreshPurchasedApps()
+        }
     }
 
     deinit {
@@ -641,6 +648,10 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         let currentKnown = self.knownDevices
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
+            if self.isRefreshingDevicesInProgress { return }
+            self.isRefreshingDevicesInProgress = true
+            defer { self.isRefreshingDevicesInProgress = false }
+            
             let onlineDevs = self.getConnectedDevicesDetails(currentKnown: currentKnown)
 
             DispatchQueue.main.async {
@@ -1079,6 +1090,9 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         }
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = arguments
+        if #available(macOS 10.10, *) {
+            proc.qualityOfService = .utility
+        }
         
         let pipe = Pipe()
         proc.standardOutput = pipe
@@ -1141,6 +1155,9 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         }
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = arguments
+        if #available(macOS 10.10, *) {
+            proc.qualityOfService = .utility
+        }
 
         let pipe = Pipe()
         proc.standardOutput = pipe
@@ -1175,7 +1192,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
     public func getConnectedDevicesDetails(currentKnown: [DeviceInfo] = []) -> [DeviceInfo] {
         let iosBin = StandaloneToolchain.shared.iosBinaryPath
         if FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 15.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 15.0)
             if status == 0 && !data.isEmpty {
                 var jsonDict: [String: Any]? = nil
                 if let directDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1205,7 +1222,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         if let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty, known.name != "iPhone" {
                             devName = known.name
                         } else {
-                            let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(udid)"], timeout: 8.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                            let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(udid)"], timeout: 8.0)
                             if nameStatus == 0,
                                let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
                                let fetched = nameJson["devicename"] as? String, !fetched.isEmpty {
