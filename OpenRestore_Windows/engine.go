@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const KeychainPassphrase = "openrestore_passphrase_v1"
@@ -539,4 +542,147 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+type UpdateInfo struct {
+	Version      string `json:"version"`
+	Title        string `json:"title"`
+	ReleaseNotes string `json:"releaseNotes"`
+	DownloadURL  string `json:"downloadUrl"`
+	IsNewer      bool   `json:"isNewer"`
+	CurrentVer   string `json:"currentVersion"`
+}
+
+const CurrentAppVersion = "1.6.0"
+
+func (e *AppEngine) CheckForUpdates() (*UpdateInfo, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("github error: %d", resp.StatusCode)
+	}
+
+	var ghRelease struct {
+		TagName string `json:"tag_name"`
+		Name    string `json:"name"`
+		Body    string `json:"body"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&ghRelease); err != nil {
+		return nil, err
+	}
+
+	var winZipURL string
+	for _, a := range ghRelease.Assets {
+		if strings.Contains(strings.ToLower(a.Name), "windows") && strings.HasSuffix(a.Name, ".zip") {
+			winZipURL = a.BrowserDownloadURL
+			break
+		}
+	}
+
+	cleanTag := strings.TrimPrefix(strings.TrimPrefix(ghRelease.TagName, "v"), "V")
+	isNewer := cleanTag > CurrentAppVersion
+
+	return &UpdateInfo{
+		Version:      ghRelease.TagName,
+		Title:        ghRelease.Name,
+		ReleaseNotes: ghRelease.Body,
+		DownloadURL:  winZipURL,
+		IsNewer:      isNewer,
+		CurrentVer:   CurrentAppVersion,
+	}, nil
+}
+
+func (e *AppEngine) PerformSelfUpdate() error {
+	info, err := e.CheckForUpdates()
+	if err != nil || info.DownloadURL == "" {
+		return fmt.Errorf("не удалось получить ссылку на обновление: %v", err)
+	}
+
+	e.Log(fmt.Sprintf("🚀 Скачивание обновления Windows: %s...", info.Version))
+	e.Broadcast(ProgressEvent{
+		Type:    "progress",
+		Stage:   "Скачивание обновления Windows...",
+		Percent: 20.0,
+	})
+
+	tempZip := filepath.Join(os.TempDir(), "OpenRestore_Win_update.zip")
+	out, err := os.Create(tempZip)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	resp, err := http.Get(info.DownloadURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return err
+	}
+	out.Close()
+
+	e.Broadcast(ProgressEvent{
+		Type:    "progress",
+		Stage:   "Распаковка обновления...",
+		Percent: 75.0,
+	})
+
+	extractDir := filepath.Join(os.TempDir(), "OpenRestore_Win_extracted")
+	os.RemoveAll(extractDir)
+	os.MkdirAll(extractDir, 0755)
+
+	// Unzip using powershell
+	psCmd := exec.Command("powershell", "-NoProfile", "-Command", fmt.Sprintf("Expand-Archive -Path '%s' -DestinationPath '%s' -Force", tempZip, extractDir))
+	prepareCmd(psCmd)
+	_ = psCmd.Run()
+
+	appDir, _ := os.Getwd()
+	batScript := filepath.Join(os.TempDir(), "openrestore_win_updater.bat")
+
+	batContent := fmt.Sprintf(`@echo off
+timeout /t 2 /nobreak > nul
+:wait
+tasklist | find /i "OpenRestore.exe" > nul
+if %%errorlevel%% == 0 (
+    timeout /t 1 /nobreak > nul
+    goto wait
+)
+xcopy /s /e /y "%s\*" "%s\"
+start "" "%s\OpenRestore.exe"
+del "%%~f0"
+`, extractDir, appDir, appDir)
+
+	os.WriteFile(batScript, []byte(batContent), 0755)
+
+	e.Broadcast(ProgressEvent{
+		Type:    "progress",
+		Stage:   "Перезапуск приложения...",
+		Percent: 100.0,
+	})
+
+	cmd := exec.Command("cmd.exe", "/c", "start", "", batScript)
+	prepareCmd(cmd)
+	_ = cmd.Start()
+
+	time.Sleep(500 * time.Millisecond)
+	os.Exit(0)
+	return nil
 }

@@ -26,6 +26,8 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/install", h.handleInstall)
 	mux.HandleFunc("/api/library", h.handleLibrary)
 	mux.HandleFunc("/api/open-folder", h.handleOpenFolder)
+	mux.HandleFunc("/api/updates/check", h.handleCheckUpdates)
+	mux.HandleFunc("/api/updates/install", h.handleInstallUpdate)
 	mux.HandleFunc("/api/events", h.handleEvents)
 }
 
@@ -222,3 +224,26 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+func (h *APIHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Request) {
+	info, err := h.engine.CheckForUpdates()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+func (h *APIHandler) handleInstallUpdate(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		_ = h.engine.PerformSelfUpdate()
+	}()
+	resp := map[string]interface{}{
+		"success": true,
+		"message": "Обновление запущено",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+

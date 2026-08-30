@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSSE();
   refreshAll();
   setInterval(refreshStatus, 5000);
+  setTimeout(() => checkForUpdates(true), 3000);
 });
 
 // SSE for Real-time Progress & Logs
@@ -380,3 +381,71 @@ function escapeHtml(s) {
 function escapeJs(s) {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
+
+// In-App Auto-Update System
+let latestUpdateData = null;
+
+async function checkForUpdates(silent = false) {
+  try {
+    const res = await fetch('/api/updates/check');
+    if (!res.ok) return;
+    const data = await res.json();
+    latestUpdateData = data;
+
+    const statusEl = document.getElementById('settings-update-status');
+    const installBtn = document.getElementById('btn-install-update');
+
+    if (data.isNewer) {
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="text-emerald-400 font-semibold">🎉 Доступна новая версия ${data.version}!</span>`;
+      }
+      if (installBtn) {
+        installBtn.classList.remove('hidden');
+        installBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> Обновить до ${data.version}`;
+      }
+      const navSettings = document.getElementById('nav-settings');
+      if (navSettings && !document.getElementById('update-dot')) {
+        navSettings.innerHTML += ` <span id="update-dot" class="ml-auto w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>`;
+      }
+      if (!silent) {
+        alert(`Доступна новая версия: ${data.version}!\n\nНажмите кнопку «Обновить» в настройках для автоматической установки.`);
+      }
+    } else {
+      if (statusEl) {
+        statusEl.innerText = `У вас установлена самая актуальная версия (${data.currentVersion || 'v1.6.0'}).`;
+      }
+      if (installBtn) {
+        installBtn.classList.add('hidden');
+      }
+      if (!silent) {
+        alert('У вас установлена самая последняя версия программы!');
+      }
+    }
+  } catch (err) {
+    if (!silent) {
+      alert('Ошибка проверки обновлений: ' + err.message);
+    }
+  }
+}
+
+function checkForUpdatesManual() {
+  checkForUpdates(false);
+}
+
+async function installUpdateManual() {
+  if (!confirm('Обновить OpenRestore до последней версии с GitHub?\n\nПрограмма автоматически скачает архив, распакует новую версию и перезапустится.')) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/updates/install', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('progress-stage-text').innerText = 'Скачивание и установка обновления...';
+      document.getElementById('progress-percent-text').innerText = '100%';
+      document.getElementById('progress-bar-fill').style.width = '100%';
+    }
+  } catch (err) {
+    alert('Ошибка при запуске обновления: ' + err.message);
+  }
+}
+

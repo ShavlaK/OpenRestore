@@ -414,10 +414,13 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     @Published public var isAccessibilityGranted: Bool = false
     @Published public var isAutomationGranted: Bool = false
 
-    // Update Checker State
+    // Update Checker & Self Updater State
     @Published public var latestUpdateInfo: AppUpdateInfo? = nil
     @Published public var isCheckingUpdates: Bool = false
     @Published public var updateCheckError: String? = nil
+    @Published public var isUpdatingApp: Bool = false
+    @Published public var updateDownloadProgress: Double = 0.0
+    @Published public var updateStatusStage: String = ""
 
     // Live Progress Tracking
     @Published public var operationProgress: Double = 0.0
@@ -439,6 +442,14 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             self.refreshPurchasedApps()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) {
+            let autoCheck = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
+            if autoCheck {
+                Task {
+                    _ = await self.checkForUpdates()
+                }
+            }
         }
     }
 
@@ -3078,7 +3089,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             self.isCheckingUpdates = false
         }
 
-        guard let url = URL(string: "https://api.github.com/repos/Shavlak_1/OpenRestore/releases/latest") else {
+        guard let url = URL(string: "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest") else {
             return (nil, "Неверный URL обновлений")
         }
 
@@ -3094,9 +3105,9 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
             if httpResponse.statusCode == 404 {
                 let info = AppUpdateInfo(
-                    id: "v1.5.0",
-                    version: "v1.5.0",
-                    title: "OpenRestore v1.5.0",
+                    id: "v1.6.0",
+                    version: "v1.6.0",
+                    title: "OpenRestore v1.6.0",
                     releaseNotes: "У вас установлена самая свежая версия программы.",
                     downloadUrl: nil,
                     publishedAt: "",
@@ -3124,19 +3135,24 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             let pubDate = (json["published_at"] as? String) ?? ""
 
             var downloadUrl: String? = nil
+            var directAppZipUrl: String? = nil
+
             if let assets = json["assets"] as? [[String: Any]] {
                 for asset in assets {
-                    if let dUrl = asset["browser_download_url"] as? String {
-                        if dUrl.hasSuffix(".dmg") || dUrl.hasSuffix(".zip") {
+                    if let aName = asset["name"] as? String, let dUrl = asset["browser_download_url"] as? String {
+                        if aName == "OpenRestore.app.zip" {
+                            directAppZipUrl = dUrl
+                        } else if aName.hasSuffix("-macOS.zip") && directAppZipUrl == nil {
+                            directAppZipUrl = dUrl
+                        } else if aName.hasSuffix(".dmg") && downloadUrl == nil {
                             downloadUrl = dUrl
-                            break
                         }
                     }
                 }
             }
-            if downloadUrl == nil {
-                downloadUrl = json["html_url"] as? String
-            }
+
+            // Prefer direct .zip for seamless in-app replacement
+            let finalDownloadUrl = directAppZipUrl ?? downloadUrl ?? (json["html_url"] as? String)
 
             let cleanTag = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
             let cleanCurrent = actualVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
@@ -3148,17 +3164,154 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                 version: tagName,
                 title: releaseName,
                 releaseNotes: body,
-                downloadUrl: downloadUrl,
+                downloadUrl: finalDownloadUrl,
                 publishedAt: pubDate,
                 isNewer: isNewer
             )
 
             self.latestUpdateInfo = updateInfo
+            LogManager.shared.log("🔍 Проверка обновлений: текущая v\(actualVersion), на сервере \(tagName) (новее: \(isNewer))", level: "UPDATE")
             return (updateInfo, nil)
         } catch {
             let errMsg = error.localizedDescription
             self.updateCheckError = errMsg
             return (nil, errMsg)
+        }
+    }
+
+    @MainActor
+    public func performSelfUpdate(updateInfo: AppUpdateInfo) async -> (Bool, String) {
+        guard let downloadUrlStr = updateInfo.downloadUrl, let url = URL(string: downloadUrlStr) else {
+            return (false, "Ссылка на скачивание обновления недоступна")
+        }
+
+        self.isUpdatingApp = true
+        self.updateDownloadProgress = 0.05
+        self.updateStatusStage = "Подготовка к скачиванию..."
+        LogManager.shared.log("🚀 Запуск процесса самообновления OpenRestore до \(updateInfo.version)...", level: "UPDATE")
+
+        let tempDir = NSTemporaryDirectory()
+        let updateZipPath = "\(tempDir)OpenRestore_update.zip"
+        let extractDir = "\(tempDir)OpenRestore_extracted"
+
+        try? FileManager.default.removeItem(atPath: updateZipPath)
+        try? FileManager.default.removeItem(atPath: extractDir)
+        try? FileManager.default.createDirectory(atPath: extractDir, withIntermediateDirectories: true)
+
+        do {
+            self.updateStatusStage = "Скачивание новой версии..."
+            self.updateDownloadProgress = 0.15
+
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 300
+
+            let (tempLocalUrl, response) = try await URLSession.shared.download(for: req)
+            guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else {
+                self.isUpdatingApp = false
+                return (false, "Ошибка сервера при скачивании архива")
+            }
+
+            self.updateDownloadProgress = 0.65
+            self.updateStatusStage = "Распаковка обновления..."
+
+            try? FileManager.default.removeItem(atPath: updateZipPath)
+            try FileManager.default.moveItem(at: tempLocalUrl, to: URL(fileURLWithPath: updateZipPath))
+
+            // Unzip archive via ditto
+            let unzipProc = Process()
+            unzipProc.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            unzipProc.arguments = ["-x", "-k", updateZipPath, extractDir]
+            try unzipProc.run()
+            unzipProc.waitUntilExit()
+
+            // Find .app inside extractDir
+            var foundAppPath: String? = nil
+            let fileManager = FileManager.default
+            let subEntries = (try? fileManager.contentsOfDirectory(atPath: extractDir)) ?? []
+            for item in subEntries {
+                let fullPath = "\(extractDir)/\(item)"
+                if item.hasSuffix(".app") {
+                    foundAppPath = fullPath
+                    break
+                }
+                // Check one level deep
+                let nested = (try? fileManager.contentsOfDirectory(atPath: fullPath)) ?? []
+                for n in nested {
+                    if n.hasSuffix(".app") {
+                        foundAppPath = "\(fullPath)/\(n)"
+                        break
+                    }
+                }
+                if foundAppPath != nil { break }
+            }
+
+            guard let newAppPath = foundAppPath, fileManager.fileExists(atPath: newAppPath) else {
+                self.isUpdatingApp = false
+                return (false, "Не удалось обнаружить OpenRestore.app в скачанном архиве")
+            }
+
+            self.updateDownloadProgress = 0.85
+            self.updateStatusStage = "Установка новой версии..."
+
+            // Determine target path
+            let currentBundlePath = Bundle.main.bundlePath
+            let targetDestPath: String
+            if currentBundlePath.hasSuffix(".app") {
+                targetDestPath = currentBundlePath
+            } else {
+                targetDestPath = "/Applications/OpenRestore.app"
+            }
+
+            // Create detached updater script
+            let updaterScriptPath = "\(tempDir)openrestore_updater.sh"
+            let scriptContent = """
+            #!/bin/bash
+            OLD_PID=$1
+            SRC_APP="$2"
+            DEST_APP="$3"
+
+            # Wait for previous application process to terminate
+            while kill -0 "$OLD_PID" 2>/dev/null; do
+                sleep 0.2
+            done
+
+            sleep 0.4
+
+            # Replace bundle
+            rm -rf "$DEST_APP"
+            cp -R "$SRC_APP" "$DEST_APP"
+            xattr -cr "$DEST_APP" 2>/dev/null || true
+
+            # Cleanup
+            rm -rf "$SRC_APP" "$(dirname "$SRC_APP")" "/tmp/OpenRestore_update.zip" 2>/dev/null || true
+
+            # Launch updated app
+            open "$DEST_APP"
+            """
+
+            try scriptContent.write(toFile: updaterScriptPath, atomically: true, encoding: .utf8)
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: updaterScriptPath)
+
+            self.updateDownloadProgress = 1.0
+            self.updateStatusStage = "Перезапуск OpenRestore..."
+
+            let currentPid = ProcessInfo.processInfo.processIdentifier
+
+            let updaterProc = Process()
+            updaterProc.executableURL = URL(fileURLWithPath: "/bin/bash")
+            updaterProc.arguments = [updaterScriptPath, "\(currentPid)", newAppPath, targetDestPath]
+            try updaterProc.run()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                NSApplication.shared.terminate(nil)
+            }
+
+            return (true, "Обновление установлено. Выполняется перезапуск...")
+        } catch {
+            self.isUpdatingApp = false
+            let msg = "Ошибка установки обновления: \(error.localizedDescription)"
+            LogManager.shared.log("❌ \(msg)", level: "UPDATE")
+            return (false, msg)
         }
     }
 }

@@ -328,6 +328,21 @@
               Открыть
             </button>
           </div>
+
+          <div class="pt-4 border-t border-zinc-800 flex items-center justify-between">
+            <div>
+              <h4 class="font-semibold text-white text-sm">Обновления программы</h4>
+              <p id="settings-update-status" class="text-xs text-zinc-400 mt-0.5">Текущая версия: v1.6.0 (Windows x64)</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="btn-check-update" onclick="checkForUpdatesManual()" class="px-3.5 py-1.5 rounded-xl bg-teal-600/20 text-teal-400 hover:bg-teal-600/30 text-xs font-medium flex items-center gap-1.5 transition-all">
+                <i class="fa-solid fa-arrow-rotate-right"></i> Проверить
+              </button>
+              <button id="btn-install-update" onclick="installUpdateManual()" class="hidden px-3.5 py-1.5 rounded-xl bg-green-600 text-white hover:bg-green-500 text-xs font-medium flex items-center gap-1.5 shadow-lg shadow-green-600/20 transition-all animate-pulse">
+                <i class="fa-solid fa-cloud-arrow-down"></i> Обновить
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 

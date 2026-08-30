@@ -569,7 +569,14 @@ struct ContentView: View {
 
                 Spacer()
 
-                if let c = count, c > 0 {
+                if item == .settings && engine.latestUpdateInfo?.isNewer == true {
+                    Text("NEW")
+                        .font(.system(size: 8, weight: .black, design: .rounded))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.green))
+                        .foregroundColor(.white)
+                } else if let c = count, c > 0 {
                     Text("\(c)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .padding(.horizontal, 6)
@@ -1733,25 +1740,36 @@ struct ContentView: View {
                             }
                         }
 
-                        if let info = engine.latestUpdateInfo {
+                        if engine.isUpdatingApp {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    ProgressView(value: engine.updateDownloadProgress)
+                                        .progressViewStyle(.linear)
+                                    Text("\(Int(engine.updateDownloadProgress * 100))%")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                }
+
+                                HStack {
+                                    Text(engine.updateStatusStage)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        } else if let info = engine.latestUpdateInfo {
                             if info.isNewer {
-                                VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     HStack {
                                         Image(systemName: "sparkles")
                                             .foregroundColor(.yellow)
                                         Text("Доступна новая версия: \(info.version)!")
-                                            .font(.system(size: 12, weight: .bold))
+                                            .font(.system(size: 13, weight: .bold))
                                             .foregroundColor(.green)
                                         Spacer()
-                                        if let dUrl = info.downloadUrl, let url = URL(string: dUrl) {
-                                            Button("Скачать обновление") {
-                                                NSWorkspace.shared.open(url)
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                            .roundedCapsuleButton()
-                                            .tint(.green)
-                                            .controlSize(.small)
-                                        }
                                     }
 
                                     if !info.releaseNotes.isEmpty {
@@ -1760,16 +1778,53 @@ struct ContentView: View {
                                             .foregroundColor(.secondary)
                                             .lineLimit(4)
                                     }
+
+                                    HStack(spacing: 8) {
+                                        Button(action: {
+                                            Task {
+                                                _ = await engine.performSelfUpdate(updateInfo: info)
+                                            }
+                                        }) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                                                Text("Обновить и перезапустить")
+                                            }
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .roundedCapsuleButton()
+                                        .tint(.green)
+                                        .controlSize(.small)
+
+                                        if let dUrl = info.downloadUrl, let url = URL(string: dUrl) {
+                                            Button("Открыть на GitHub") {
+                                                NSWorkspace.shared.open(url)
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .roundedCapsuleButton()
+                                            .controlSize(.small)
+                                        }
+                                    }
                                 }
-                                .padding(10)
+                                .padding(12)
                                 .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                             } else {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .foregroundColor(.green)
-                                    Text("У вас установлена самая актуальная версия программы (\(info.version)).")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.secondary)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "checkmark.seal.fill")
+                                            .foregroundColor(.green)
+                                        Text("У вас установлена актуальная версия (\(info.version)).")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Button("Переустановить с GitHub") {
+                                            Task {
+                                                _ = await engine.performSelfUpdate(updateInfo: info)
+                                            }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .roundedCapsuleButton()
+                                        .controlSize(.mini)
+                                    }
                                 }
                                 .padding(8)
                                 .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
