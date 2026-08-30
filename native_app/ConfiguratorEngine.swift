@@ -2819,12 +2819,13 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         }
 
         var userFriendlyErr = rawOut
-        if rawOut.contains("failed to purchase") {
-            userFriendlyErr = "Приложение не привязано к данному Apple ID (лицензия не найдена)"
-        } else if rawOut.contains("item is unavailable") || rawOut.contains("temporarily unavailable") {
+        let lower = rawOut.lowercased()
+        if lower.contains("auth code is required") || lower.contains("auth code") || lower.contains("auth-code") || lower.contains("2fa") || lower.contains("verification") || lower.contains("keyring") || lower.contains("account") || lower.contains("unauthorized") || lower.contains("sign in") || lower.contains("login") {
+            return (false, "AUTH_REQUIRED: Требуется вход в Apple ID (код подтверждения 2FA). Нажмите на профиль Apple ID в меню слева и выполните вход.", nil)
+        } else if lower.contains("failed to purchase") || lower.contains("license") {
+            userFriendlyErr = "Приложение не найдено в покупках данного Apple ID или недоступно в этом регионе."
+        } else if lower.contains("item is unavailable") || lower.contains("temporarily unavailable") {
             userFriendlyErr = "Приложение временно недоступно на серверах Apple"
-        } else if rawOut.contains("keyring") || rawOut.contains("account") {
-            return (false, "AUTH_REQUIRED: Сессия Apple ID устарела. Авторизуйтесь заново", nil)
         }
 
         return (false, userFriendlyErr.isEmpty ? "Ошибка прямой загрузки App Store" : userFriendlyErr, nil)
