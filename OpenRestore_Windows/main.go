@@ -50,13 +50,24 @@ func main() {
 
 	// Launch App Window
 	time.Sleep(300 * time.Millisecond)
-	openAppWindow(url)
+	cmd := openAppWindow(url)
 
-	// Keep running
-	select {}
+	if cmd != nil {
+		cmd.Wait() // Wait for the browser window to close
+	} else {
+		// Keep running if we couldn't launch an isolated browser window
+		select {}
+	}
+	
+	// Cleanup background processes before exiting
+	fmt.Println("Cleaning up background processes...")
+	if runtime.GOOS == "windows" {
+		exec.Command("taskkill", "/F", "/IM", "ipatool.exe", "/T").Run()
+		exec.Command("taskkill", "/F", "/IM", "ios.exe", "/T").Run()
+	}
 }
 
-func openAppWindow(url string) {
+func openAppWindow(url string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		tempUserData := filepath.Join(os.Getenv("TEMP"), "openrestore_edge_profile")
 		edgePaths := []string{
@@ -88,7 +99,7 @@ func openAppWindow(url string) {
 				)
 				prepareCmd(cmd)
 				if err := cmd.Start(); err == nil {
-					return
+					return cmd
 				}
 			}
 		}
@@ -97,9 +108,12 @@ func openAppWindow(url string) {
 		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 		prepareCmd(cmd)
 		cmd.Start()
+		return nil
 	} else if runtime.GOOS == "darwin" {
 		exec.Command("open", url).Start()
+		return nil
 	} else {
 		exec.Command("xdg-open", url).Start()
+		return nil
 	}
 }
