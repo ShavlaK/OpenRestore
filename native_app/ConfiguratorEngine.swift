@@ -442,7 +442,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     public func startDevicePolling() {
         DispatchQueue.main.async {
             self.devicePollTimer?.invalidate()
-            self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
+            self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
                 self.refreshDevices()
             }
@@ -638,9 +638,10 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     }
 
     public func refreshDevices() {
+        let currentKnown = self.knownDevices
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let onlineDevs = self.getConnectedDevicesDetails()
+            let onlineDevs = self.getConnectedDevicesDetails(currentKnown: currentKnown)
 
             DispatchQueue.main.async {
                 // Priority sorting: USB (Cable) takes top priority over Wi-Fi
@@ -1171,10 +1172,10 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         return (proc.terminationStatus, outputData)
     }
 
-    public func getConnectedDevicesDetails() -> [DeviceInfo] {
+    public func getConnectedDevicesDetails(currentKnown: [DeviceInfo] = []) -> [DeviceInfo] {
         let iosBin = StandaloneToolchain.shared.iosBinaryPath
         if FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 15.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
             if status == 0 && !data.isEmpty {
                 var jsonDict: [String: Any]? = nil
                 if let directDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1201,11 +1202,15 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         let connType: DeviceConnectionType = (rawConn.lowercased().contains("net") || rawConn.lowercased().contains("wi")) ? .wifi : .usb
 
                         var devName = "iPhone"
-                        let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(udid)"], timeout: 3.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
-                        if nameStatus == 0,
-                           let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
-                           let fetched = nameJson["devicename"] as? String, !fetched.isEmpty {
-                            devName = fetched
+                        if let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty, known.name != "iPhone" {
+                            devName = known.name
+                        } else {
+                            let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(udid)"], timeout: 8.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                            if nameStatus == 0,
+                               let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
+                               let fetched = nameJson["devicename"] as? String, !fetched.isEmpty {
+                                devName = fetched
+                            }
                         }
 
                         let marketingName = Self.mapMarketingName(productType, modelNumber: "")

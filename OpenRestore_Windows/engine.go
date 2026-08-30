@@ -254,13 +254,33 @@ func (e *AppEngine) Login(email, password, authCode string) (bool, string) {
 
 	if err != nil {
 		lower := strings.ToLower(outStr)
-		if strings.Contains(lower, "2fa") || strings.Contains(lower, "code") || strings.Contains(lower, "two-factor") || strings.Contains(lower, "verification") || strings.Contains(lower, "required") {
+		if strings.Contains(lower, "2fa") || strings.Contains(lower, "code") || strings.Contains(lower, "two-factor") || strings.Contains(lower, "verification") || strings.Contains(lower, "required") || strings.Contains(lower, "security") {
 			return false, "NEED_2FA"
 		}
-		if outStr == "" {
-			outStr = err.Error()
+		
+		// Parse JSON error if present
+		errMsg := outStr
+		lines := strings.Split(outStr, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "\"error\"") {
+				var j map[string]interface{}
+				if err := json.Unmarshal([]byte(line), &j); err == nil {
+					if e, ok := j["error"].(string); ok {
+						errMsg = e
+						break
+					}
+				}
+			}
 		}
-		return false, outStr
+
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		if strings.Contains(lower, "anisette") || strings.Contains(lower, "apple application support") {
+			errMsg = "Для входа требуется установить iTunes с официального сайта Apple (не из Microsoft Store)."
+		}
+		
+		return false, errMsg
 	}
 
 	e.CheckAuthStatus()

@@ -262,18 +262,10 @@ struct ContentView: View {
             VisualEffectBlur(material: .sidebar, blendingMode: .behindWindow)
                 .ignoresSafeArea()
 
-            HStack(spacing: 0) {
-                // 1. Sidebar Navigation
+            NavigationSplitView {
                 sidebarNavigationView
-                    .frame(width: 250)
-
-                // Separator
-                Rectangle()
-                    .fill(Color(NSColor.separatorColor).opacity(0.35))
-                    .frame(width: 1)
-                    .ignoresSafeArea()
-
-                // 2. Main Content Area
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 280)
+            } detail: {
                 ZStack {
                     detailContentView
                 }
