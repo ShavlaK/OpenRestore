@@ -221,13 +221,26 @@ func (e *AppEngine) CheckAuthStatus() (bool, string, string) {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-	if err := json.Unmarshal(out, &status); err == nil && status.Email != "" {
-		e.mu.Lock()
-		e.isLoggedIn = true
-		e.appleID = status.Email
-		e.appleName = status.Name
-		e.mu.Unlock()
-		return true, status.Email, status.Name
+	
+	// Find the JSON line in the output
+	var jsonStr string
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "{") {
+			jsonStr = line
+		}
+	}
+
+	if jsonStr != "" {
+		if err := json.Unmarshal([]byte(jsonStr), &status); err == nil && status.Email != "" {
+			e.mu.Lock()
+			e.isLoggedIn = true
+			e.appleID = status.Email
+			e.appleName = status.Name
+			e.mu.Unlock()
+			return true, status.Email, status.Name
+		}
 	}
 
 	return false, "", ""
@@ -318,7 +331,7 @@ func (e *AppEngine) GetPurchases(forceRefresh bool) ([]PurchaseItem, error) {
 
 		cmd := exec.Command(ipatool, "list-purchases", "-p", strconv.Itoa(page), "--non-interactive", "--format", "json", "--keychain-passphrase", KeychainPassphrase)
 		prepareCmd(cmd)
-		out, err := cmd.CombinedOutput()
+		out, err := cmd.Output()
 		if err != nil {
 			break
 		}
