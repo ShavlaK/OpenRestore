@@ -2837,6 +2837,7 @@ struct ContentView: View {
     // MARK: - Business Logic
 
     private func startBatchDownload(installToDevice: Bool) {
+        LogManager.shared.log("👤 Действие пользователя: Запуск пакетного скачивания \(installToDevice ? "с установкой" : "")", level: "USER_ACTION")
         guard !selectedAdamIds.isEmpty, !isBatchDownloading else { return }
 
         let selectedApps: [(adamId: Int64, name: String)] = selectedAdamIds.compactMap { aid in
@@ -2915,6 +2916,7 @@ struct ContentView: View {
     }
 
     private func startInstallFlow(ipaPath: String, name: String) {
+        LogManager.shared.log("👤 Действие пользователя: Запуск установки локального IPA \(name)", level: "USER_ACTION")
         if !engine.isDirectAppleIdAuthenticated && currentEngineMode == .direct {
             showAppleIdSheet = true
             return
@@ -2954,6 +2956,7 @@ struct ContentView: View {
     }
 
     private func startRestoreFlow(adamId: Int64, name: String, extVersion: Int64 = 0, installToDevice: Bool = false) {
+        LogManager.shared.log("👤 Действие пользователя: Запуск загрузки приложения \(name) из App Store", level: "USER_ACTION")
         if !engine.isDirectAppleIdAuthenticated && currentEngineMode == .direct {
             showAppleIdSheet = true
             return
@@ -3185,6 +3188,7 @@ struct ContentView: View {
     }
 
     private func importIpaFile() {
+        LogManager.shared.log("👤 Действие пользователя: Импорт стороннего IPA-файла", level: "USER_ACTION")
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false

@@ -122,7 +122,19 @@ func (e *AppEngine) Unsubscribe(ch chan ProgressEvent) {
 	close(ch)
 }
 
-func (e *AppEngine) Log(msg string) {
+func (e *AppEngine) Log(msg string, level ...string) {
+	lvl := "INFO"
+	if len(level) > 0 {
+		lvl = level[0]
+	}
+	
+	if e.LogFile != nil {
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		e.LogFile.WriteString(fmt.Sprintf("[%s] [%s] %s
+", timestamp, lvl, msg))
+		e.LogFile.Sync()
+	}
+
 	fmt.Println(msg)
 	e.Broadcast(ProgressEvent{
 		Type: "log",
@@ -270,7 +282,7 @@ func (e *AppEngine) Login(email, password, authCode string) (bool, string) {
 
 	if err != nil {
 		lower := strings.ToLower(outStr)
-		if strings.Contains(lower, "2fa code is required") || strings.Contains(lower, "two-factor") || strings.Contains(lower, "auth-code") {
+		if strings.Contains(lower, "2fa code is required") || strings.Contains(lower, "auth-code") {
 			return false, "NEED_2FA"
 		}
 		
