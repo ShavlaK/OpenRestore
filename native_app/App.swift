@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct OpenRestoreApp: App {
+struct OpenStoreApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {

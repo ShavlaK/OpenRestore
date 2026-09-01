@@ -105,7 +105,7 @@ function switchTab(tab) {
     library: 'Библиотека IPA',
     settings: 'Настройки'
   };
-  document.getElementById('header-title').innerText = titles[tab] || 'OpenRestore';
+  document.getElementById('header-title').innerText = titles[tab] || 'Open Store';
 
   if (tab === 'purchases') loadPurchases(false);
   if (tab === 'library') loadLibrary();
@@ -433,7 +433,7 @@ function checkForUpdatesManual() {
 }
 
 async function installUpdateManual() {
-  if (!confirm('Обновить OpenRestore до последней версии с GitHub?\n\nПрограмма автоматически скачает архив, распакует новую версию и перезапустится.')) {
+  if (!confirm('Обновить Open Store до последней версии с GitHub?\n\nПрограмма автоматически скачает архив, распакует новую версию и перезапустится.')) {
     return;
   }
   try {

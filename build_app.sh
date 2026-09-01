@@ -4,13 +4,15 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-echo "Компиляция нативного приложения OpenRestore.app (Раздельные Архитектуры)..."
+echo "Компиляция нативного приложения Open Store.app (v1.6.1)..."
+
+VERSION="1.6.1"
 
 # Create build functions
 build_app_for_arch() {
     local arch=$1      # arm64 or x86_64
     local target_arch=$2 # arm64-apple-macos13.0 or x86_64-apple-macos13.0
-    local app_dir="build_tmp/OpenRestore_${arch}.app"
+    local app_dir="build_tmp/OpenStore_${arch}.app"
     
     mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources/bin"
 
@@ -23,15 +25,15 @@ build_app_for_arch() {
     <key>CFBundleDevelopmentRegion</key>
     <string>ru</string>
     <key>CFBundleExecutable</key>
-    <string>OpenRestore</string>
+    <string>OpenStore</string>
     <key>CFBundleIdentifier</key>
-    <string>com.openrestore.app</string>
+    <string>com.openstore.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>OpenRestore</string>
+    <string>Open Store</string>
     <key>CFBundleDisplayName</key>
-    <string>OpenRestore</string>
+    <string>Open Store</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -39,9 +41,9 @@ build_app_for_arch() {
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.6.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1.6.0</string>
+    <string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -53,7 +55,7 @@ PLIST
     # Compile Swift
     swiftc -O -parse-as-library -target "$target_arch" \
       native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
-      -lsqlite3 -o "$app_dir/Contents/MacOS/OpenRestore"
+      -lsqlite3 -o "$app_dir/Contents/MacOS/OpenStore"
 
     cp catalog.json "$app_dir/Contents/Resources/catalog.json"
     if [ -f "AppIcon.icns" ]; then
@@ -64,29 +66,55 @@ PLIST
     if [ -f "bin/ios" ]; then
       lipo bin/ios -extract "$arch" -output "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || cp bin/ios "$app_dir/Contents/Resources/bin/ios"
       chmod +x "$app_dir/Contents/Resources/bin/ios"
-      codesign --force --identifier com.openrestore.ios -s - "$app_dir/Contents/Resources/bin/ios"
+      codesign --force --identifier com.openstore.ios -s - "$app_dir/Contents/Resources/bin/ios"
     fi
 
     if [ -f "bin/ipatool" ]; then
       lipo bin/ipatool -extract "$arch" -output "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || cp bin/ipatool "$app_dir/Contents/Resources/bin/ipatool"
       chmod +x "$app_dir/Contents/Resources/bin/ipatool"
-      codesign --force --identifier com.openrestore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool"
+      codesign --force --identifier com.openstore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool"
     fi
 
     if [ -f "bin/ios-scanner" ]; then
       lipo bin/ios-scanner -extract "$arch" -output "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || cp bin/ios-scanner "$app_dir/Contents/Resources/bin/ios-scanner"
       chmod +x "$app_dir/Contents/Resources/bin/ios-scanner"
-      codesign --force --identifier com.openrestore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner"
+      codesign --force --identifier com.openstore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner"
     fi
 
     xattr -cr "$app_dir"
-    codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - "$app_dir"
+    codesign --force --deep --identifier com.openstore.app --entitlements openstore.entitlements -s - "$app_dir"
+}
+
+# Create Universal App Bundle (for 1.6.0 backwards compatibility zip)
+build_universal_app() {
+    local app_dir="build_tmp/OpenStore_universal.app"
+    mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources/bin"
+
+    cp "build_tmp/OpenStore_arm64.app/Contents/Info.plist" "$app_dir/Contents/Info.plist"
+    cp catalog.json "$app_dir/Contents/Resources/catalog.json"
+    if [ -f "AppIcon.icns" ]; then
+      cp AppIcon.icns "$app_dir/Contents/Resources/AppIcon.icns"
+    fi
+
+    lipo -create "build_tmp/OpenStore_arm64.app/Contents/MacOS/OpenStore" "build_tmp/OpenStore_x86_64.app/Contents/MacOS/OpenStore" -output "$app_dir/Contents/MacOS/OpenStore"
+    
+    cp bin/ios "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
+    cp bin/ipatool "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
+    cp bin/ios-scanner "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
+    
+    chmod +x "$app_dir/Contents/Resources/bin/"* 2>/dev/null || true
+    codesign --force --identifier com.openstore.ios -s - "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
+    codesign --force --identifier com.openstore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
+    codesign --force --identifier com.openstore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
+
+    xattr -cr "$app_dir"
+    codesign --force --deep --identifier com.openstore.app --entitlements openstore.entitlements -s - "$app_dir"
 }
 
 rm -rf build_tmp
 mkdir -p build_tmp
 
-cat << 'ENT' > openrestore.entitlements
+cat << 'ENT' > openstore.entitlements
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -101,4 +129,12 @@ build_app_for_arch "arm64" "arm64-apple-macos13.0"
 echo "🔨 Сборка для Intel (x86_64)..."
 build_app_for_arch "x86_64" "x86_64-apple-macos13.0"
 
-echo "Готово! Раздельные приложения находятся в build_tmp/."
+echo "🔨 Сборка Universal бандла..."
+build_universal_app
+
+# Default local app bundle
+rm -rf "Open Store.app" "OpenRestore.app"
+cp -R "build_tmp/OpenStore_universal.app" "Open Store.app"
+cp -R "build_tmp/OpenStore_universal.app" "OpenRestore.app"
+
+echo "Готово! Приложения Open Store.app успешно собраны в build_tmp/."

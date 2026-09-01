@@ -48,30 +48,52 @@
     ::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.2);
       border-radius: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 9999px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .custom-backdrop {
+      background-color: rgba(18, 18, 20, 0.85);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+    }
+    .glass-card {
+      background-color: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .glass-card-hover:hover {
+      background-color: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    .glass-active {
+      background-color: rgba(13, 148, 136, 0.15) !important;
+      border-color: rgba(13, 148, 136, 0.3) !important;
     }
   </style>
 </head>
-<body oncontextmenu="return false;" class="bg-zinc-950 text-zinc-100 flex h-screen overflow-hidden text-sm">
+<body class="bg-zinc-950 text-zinc-100 flex flex-col h-screen overflow-hidden antialiased selection:bg-teal-500 selection:text-white">
 
-  <!-- Sidebar -->
-  <aside class="w-64 bg-zinc-900/80 border-r border-zinc-800 flex flex-col justify-between backdrop-blur-xl">
-    <div>
-      <!-- Brand Logo -->
-      <div class="p-5 flex items-center gap-3 border-b border-zinc-800/60">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-          <i class="fa-solid fa-bolt text-white text-lg"></i>
+  <!-- Main Grid App Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="w-64 bg-zinc-900/60 border-r border-zinc-800/80 flex flex-col justify-between custom-backdrop">
+      <div>
+        <!-- App Logo & Version -->
+        <div class="p-4 flex items-center gap-3 border-b border-zinc-800/50">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-teal-600 via-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-teal-500/20">
+            <i class="fa-solid fa-bolt text-white text-base"></i>
+          </div>
+          <div>
+            <h1 class="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
+              Open Store
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-semibold border border-teal-500/30">v1.6.1</span>
+            </h1>
+            <p class="text-[11px] text-zinc-400 font-medium">iOS App Manager</p>
+          </div>
         </div>
-        <div>
-          <h1 class="font-bold text-base tracking-tight text-white flex items-center gap-2">
-            OpenRestore
-            <span class="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full font-mono">v1.6.0</span>
-          </h1>
-          <p class="text-xs text-zinc-400">Windows Edition</p>
-        </div>
-      </div>
 
       <!-- Navigation Links -->
       <nav class="p-3 space-y-1">
@@ -304,7 +326,7 @@
       <!-- TAB 5: Settings -->
       <section id="tab-settings" class="tab-content hidden space-y-6 max-w-2xl">
         <div>
-          <h3 class="text-lg font-bold text-white">Настройки OpenRestore</h3>
+          <h3 class="text-lg font-bold text-white">Настройки Open Store</h3>
           <p class="text-xs text-zinc-400">Конфигурация учетных записей и путей</p>
         </div>
 
@@ -322,7 +344,7 @@
           <div class="pt-4 border-t border-zinc-800 flex items-center justify-between">
             <div>
               <h4 class="font-semibold text-white text-sm">Папка сохранения IPA</h4>
-              <p id="settings-folder-path" class="text-xs text-zinc-400 font-mono mt-0.5">Downloads\OpenRestore</p>
+              <p id="settings-folder-path" class="text-xs text-zinc-400 font-mono mt-0.5">Downloads\Open Store</p>
             </div>
             <button onclick="openDownloadsFolder()" class="px-3.5 py-1.5 rounded-xl bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-xs font-medium">
               Открыть
@@ -332,7 +354,7 @@
           <div class="pt-4 border-t border-zinc-800 flex items-center justify-between">
             <div>
               <h4 class="font-semibold text-white text-sm">Обновления программы</h4>
-              <p id="settings-update-status" class="text-xs text-zinc-400 mt-0.5">Текущая версия: v1.6.0 (Windows x64)</p>
+              <p id="settings-update-status" class="text-xs text-zinc-400 mt-0.5">Текущая версия: v1.6.1 (Windows x64)</p>
             </div>
             <div class="flex items-center gap-2">
               <button id="btn-check-update" onclick="checkForUpdatesManual()" class="px-3.5 py-1.5 rounded-xl bg-teal-600/20 text-teal-400 hover:bg-teal-600/30 text-xs font-medium flex items-center gap-1.5 transition-all">
@@ -369,12 +391,12 @@
           <i class="fa-solid fa-terminal text-[10px]"></i>
           <span id="console-toggle-text">Показать консоль логов</span>
         </button>
-        <span class="text-[10px] text-zinc-600 font-mono">OpenRestore Engine</span>
+        <span class="text-[10px] text-zinc-600 font-mono">Open Store Engine</span>
       </div>
 
       <!-- Log Terminal Box -->
       <div id="log-console" class="hidden mt-2 p-3 bg-black/80 border border-zinc-800 rounded-xl font-mono text-[11px] text-zinc-400 h-28 overflow-y-auto space-y-1">
-        <div>[System] OpenRestore Windows v1.6.0 initialized</div>
+        <div>[System] Open Store Windows v1.6.1 initialized</div>
       </div>
     </div>
 

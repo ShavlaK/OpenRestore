@@ -287,13 +287,13 @@ struct ContentView: View {
         .sheet(isPresented: $showDeviceManagerSheet)    { deviceManagerSheet }
                 .sheet(isPresented: $showAppleIdSheet)          { appleIdSheet }
         .alert(isPresented: $showAlert) {
-            Alert(title: Text("OpenRestore"), message: Text(alertMessage ?? ""),
+            Alert(title: Text("Open Store"), message: Text(alertMessage ?? ""),
                   dismissButton: .default(Text("OK")))
         }
         .alert(isPresented: $showForgetConfirmDialog) {
             Alert(
                 title: Text("Удалить связь с устройством?"),
-                message: Text("Вы действительно хотите удалить сопряжение с «\(deviceToForget?.name ?? "устройством")»?\n\nСвязь и кэш будут удалены из OpenRestore, а сопряжение с Mac будет сброшено."),
+                message: Text("Вы действительно хотите удалить сопряжение с «\(deviceToForget?.name ?? "устройством")»?\n\nСвязь и кэш будут удалены из Open Store, а сопряжение с Mac будет сброшено."),
                 primaryButton: .destructive(Text("Удалить связь")) {
                     if let dev = deviceToForget {
                         engine.forgetDevice(id: dev.id)
@@ -330,7 +330,7 @@ struct ContentView: View {
                 AppLogoView(size: 30, cornerRadius: 8)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("OpenRestore")
+                    Text("Open Store")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
                     Text("iOS App Manager")
@@ -1405,7 +1405,7 @@ struct ContentView: View {
                         .pickerStyle(.segmented)
                         .frame(maxWidth: 320)
 
-                        Text("Выбор цветовой темы применяется мгновенно ко всем окнам и модальным панелям OpenRestore.")
+                        Text("Выбор цветовой темы применяется мгновенно ко всем окнам и модальным панелям Open Store.")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -1468,7 +1468,7 @@ struct ContentView: View {
                             .roundedCapsuleButton()
                             .controlSize(.small)
 
-                            Text("По умолчанию: ~/Downloads/OpenRestore")
+                            Text("По умолчанию: ~/Downloads/Open Store")
                                 .font(.system(size: 10))
                                 .foregroundColor(.secondary)
                         }
@@ -1614,10 +1614,10 @@ struct ContentView: View {
                     }
                 }
 
-                // Section 4: Debug & Logs
-                settingsCard(title: "Журнал работы и отладка (Логи)", icon: "doc.text.magnifyingglass", iconColor: .orange) {
+                // Section 4: Diagnostics & Logs
+                settingsCard(title: "Диагностика и системный журнал", icon: "doc.text.magnifyingglass", iconColor: .orange) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Файл системного журнала OpenRestore:")
+                        Text("Файл системного журнала Open Store:")
                             .font(.system(size: 12, weight: .semibold))
 
                         HStack(spacing: 8) {
@@ -1660,73 +1660,36 @@ struct ContentView: View {
                             }
                             .buttonStyle(.bordered)
                             .roundedCapsuleButton()
-                            .controlSize(.small)
-
+                            
                             Button(action: {
-                                NSWorkspace.shared.open(URL(fileURLWithPath: LogManager.shared.logFilePath))
+                                let logUrl = URL(fileURLWithPath: LogManager.shared.logFilePath)
+                                NSWorkspace.shared.activateFileViewerSelecting([logUrl])
                             }) {
-                                Label("Открыть файл", systemImage: "arrow.up.forward.square")
+                                Label("Показать лог", systemImage: "arrow.up.forward.app")
                             }
                             .buttonStyle(.bordered)
                             .roundedCapsuleButton()
                             .controlSize(.small)
                         }
 
-                        // Live Log Terminal Preview in Settings
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Последние события (Live):")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text("\(engine.progressLogs.count) записей")
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundColor(.secondary)
-                            }
-
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    if engine.progressLogs.isEmpty {
-                                        Text("Лог пуст. Выполните действие (например, загрузку IPA) для появления записей.")
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundColor(.secondary)
-                                            .padding(8)
-                                    } else {
-                                        ForEach(Array(engine.progressLogs.suffix(60).enumerated()), id: \.offset) { _, line in
-                                            Text(line)
-                                                .font(.system(size: 10, design: .monospaced))
-                                                .foregroundColor(Color(NSColor.labelColor))
-                                        }
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                            }
-                            .frame(height: 140)
-                            .background(Color(NSColor.textBackgroundColor))
-                            .cornerRadius(10)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
-                            )
-                        }
+                        Text("Лог-файл автоматически сохраняет диагностические сообщения, ошибки сетевых запросов и события установки.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                     }
                 }
 
                 // Section 5: Software Updates
-                settingsCard(title: "Обновления программы", icon: "arrow.triangle.2.circlepath.circle.fill", iconColor: .teal) {
-                    VStack(alignment: .leading, spacing: 14) {
+                settingsCard(title: "Обновление программы", icon: "arrow.triangle.2.circlepath.circle.fill", iconColor: .purple) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Текущая версия: OpenRestore v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0")")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Сборка Universal 2 для macOS (Apple Silicon & Intel)")
+                                Text("Текущая версия: Open Store v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.1")")
+                                    .font(.system(size: 13, weight: .bold))
+                                Text("Проверка релизов на GitHub в реальном времени.")
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary)
                             }
-
                             Spacer()
-
                             Button(action: {
                                 Task {
                                     _ = await engine.checkForUpdates()
@@ -1736,16 +1699,14 @@ struct ContentView: View {
                                     if engine.isCheckingUpdates {
                                         ProgressView()
                                             .controlSize(.small)
-                                        Text("Проверка...")
                                     } else {
                                         Image(systemName: "arrow.clockwise")
-                                        Text("Проверить обновления")
                                     }
+                                    Text(engine.isCheckingUpdates ? "Проверка..." : "Проверить обновления")
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.bordered)
                             .roundedCapsuleButton()
-                            .tint(.teal)
                             .controlSize(.small)
                             .disabled(engine.isCheckingUpdates)
                         }
@@ -1866,14 +1827,14 @@ struct ContentView: View {
                 }
 
                 // Section 6: About
-                settingsCard(title: "О программе OpenRestore", icon: "info.circle.fill", iconColor: .secondary) {
+                settingsCard(title: "О программе Open Store", icon: "info.circle.fill", iconColor: .secondary) {
                     HStack(spacing: 14) {
                         AppLogoView(size: 44, cornerRadius: 12)
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("OpenRestore 2.0 Pro")
+                            Text("Open Store")
                                 .font(.system(size: 13, weight: .bold))
-                            Text("Нативный клиент восстановления iOS-приложений с официальной FairPlay DRM лицензией Apple ID.")
+                            Text("Нативный клиент установки и восстановления iOS-приложений с официальной FairPlay DRM лицензией Apple ID.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
@@ -2216,7 +2177,7 @@ struct ContentView: View {
                     Image(systemName: "lock.shield.fill")
                         .font(.system(size: 14))
                         .foregroundColor(.blue)
-                    Text("Авторизация выполняется напрямую через защищенный протокол Apple Store. Ваши учетные данные шифруются по алгоритму AES-256 и сохраняются локально в изолированном файловом хранилище OpenRestore.")
+                    Text("Авторизация выполняется напрямую через защищенный протокол Apple Store. Ваши учетные данные шифруются по алгоритму AES-256 и сохраняются локально в изолированном файловом хранилище Open Store.")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }

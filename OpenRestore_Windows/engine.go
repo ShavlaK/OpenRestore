@@ -80,13 +80,19 @@ func NewAppEngine() *AppEngine {
 	if userProfile == "" {
 		userProfile, _ = os.UserHomeDir()
 	}
-	downloadsDir := filepath.Join(userProfile, "Downloads", "OpenRestore")
+	downloadsDir := filepath.Join(userProfile, "Downloads", "Open Store")
+	oldDownloadsDir := filepath.Join(userProfile, "Downloads", "OpenRestore")
+	if _, err := os.Stat(downloadsDir); os.IsNotExist(err) {
+		if _, err := os.Stat(oldDownloadsDir); err == nil {
+			_ = os.Rename(oldDownloadsDir, downloadsDir)
+		}
+	}
 	os.MkdirAll(downloadsDir, 0755)
 
-	logPath := filepath.Join(downloadsDir, "openrestore_windows.log")
+	logPath := filepath.Join(downloadsDir, "openstore_windows.log")
 	logFile, _ := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if logFile != nil {
-		logFile.WriteString(fmt.Sprintf("\n======================================================\n  OpenRestore Windows Log — Session: %s\n======================================================\n", time.Now().Format("2006-01-02 15:04:05")))
+		logFile.WriteString(fmt.Sprintf("\n======================================================\n  Open Store Windows Log — Session: %s\n======================================================\n", time.Now().Format("2006-01-02 15:04:05")))
 	}
 
 	return &AppEngine{
@@ -585,7 +591,7 @@ type UpdateInfo struct {
 	CurrentVer   string `json:"currentVersion"`
 }
 
-const CurrentAppVersion = "1.6.0"
+const CurrentAppVersion = "1.6.1"
 
 func (e *AppEngine) CheckForUpdates() (*UpdateInfo, error) {
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest", nil)
@@ -692,15 +698,24 @@ func (e *AppEngine) PerformSelfUpdate() error {
 	batContent := fmt.Sprintf(`@echo off
 timeout /t 2 /nobreak > nul
 :wait
+tasklist | find /i "OpenStore.exe" > nul
+if %%%%errorlevel%%%% == 0 (
+    timeout /t 1 /nobreak > nul
+    goto wait
+)
 tasklist | find /i "OpenRestore.exe" > nul
-if %%errorlevel%% == 0 (
+if %%%%errorlevel%%%% == 0 (
     timeout /t 1 /nobreak > nul
     goto wait
 )
 xcopy /s /e /y "%s\*" "%s\"
-start "" "%s\OpenRestore.exe"
-del "%%~f0"
-`, extractDir, appDir, appDir)
+if exist "%s\OpenStore.exe" (
+    start "" "%s\OpenStore.exe"
+) else (
+    start "" "%s\OpenRestore.exe"
+)
+del "%%%%~f0"
+`, extractDir, appDir, appDir, appDir)
 
 	os.WriteFile(batScript, []byte(batContent), 0755)
 

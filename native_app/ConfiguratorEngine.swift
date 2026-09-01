@@ -22,7 +22,12 @@ public final class StandaloneToolchain: @unchecked Sendable {
 
     public init() {
         let home = NSHomeDirectory()
-        self.appSupportDir = "\(home)/Library/Application Support/OpenRestore"
+        let newAppSupport = "\(home)/Library/Application Support/Open Store"
+        let oldAppSupport = "\(home)/Library/Application Support/OpenRestore"
+        if !FileManager.default.fileExists(atPath: newAppSupport) && FileManager.default.fileExists(atPath: oldAppSupport) {
+            try? FileManager.default.moveItem(atPath: oldAppSupport, toPath: newAppSupport)
+        }
+        self.appSupportDir = FileManager.default.fileExists(atPath: newAppSupport) ? newAppSupport : (FileManager.default.fileExists(atPath: oldAppSupport) ? oldAppSupport : newAppSupport)
         self.binDir = "\(appSupportDir)/bin"
         ensureBinariesExist()
     }
@@ -218,13 +223,13 @@ public final class LogManager: ObservableObject, @unchecked Sendable {
 
     @Published public var recentLogs: [String] = []
 
-    private let queue = DispatchQueue(label: "com.openrestore.logmanager", qos: .utility)
+    private let queue = DispatchQueue(label: "com.openstore.logmanager", qos: .utility)
     private let maxMemoryLogs = 400
 
     public var logFilePath: String {
         let dir = ConfiguratorEngine.libraryDir
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: nil)
-        return "\(dir)/openrestore.log"
+        return "\(dir)/openstore.log"
     }
 
     public init() {
@@ -234,9 +239,14 @@ public final class LogManager: ObservableObject, @unchecked Sendable {
     private func writeSessionBanner() {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        #if arch(arm64)
+        let archName = "Apple Silicon (arm64)"
+        #else
+        let archName = "Intel (x86_64)"
+        #endif
         let banner = "\n======================================================\n" +
-                     "  OpenRestore Diagnostics Log — Session: \(df.string(from: Date()))\n" +
-                     "  macOS Version: \(ProcessInfo.processInfo.operatingSystemVersionString)\n" +
+                     "  Open Store Diagnostics Log — Session: \(df.string(from: Date()))\n" +
+                     "  macOS Version: \(ProcessInfo.processInfo.operatingSystemVersionString) [\(archName)]\n" +
                      "======================================================\n"
         queue.async {
             self.appendToFile(banner)
@@ -318,7 +328,12 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     public static let workDir = Bundle.main.resourcePath ?? "/tmp"
     public static let libraryDir: String = {
         let home = NSHomeDirectory()
-        return "\(home)/Downloads/OpenRestore"
+        let newDir = "\(home)/Downloads/Open Store"
+        let oldDir = "\(home)/Downloads/OpenRestore"
+        if !FileManager.default.fileExists(atPath: newDir) && FileManager.default.fileExists(atPath: oldDir) {
+            try? FileManager.default.moveItem(atPath: oldDir, toPath: newDir)
+        }
+        return FileManager.default.fileExists(atPath: newDir) ? newDir : (FileManager.default.fileExists(atPath: oldDir) ? oldDir : newDir)
     }()
 
     public static let userMappingsPath: String = {
@@ -436,7 +451,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     private var devicePollTimer: Timer?
 
     public init() {
-        LogManager.shared.log("OpenRestore Engine инициализирован. Библиотека: \(Self.libraryDir)", level: "INIT")
+        LogManager.shared.log("Open Store Engine инициализирован. Библиотека: \(Self.libraryDir)", level: "INIT")
         cleanAllRestoreRequests()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -1868,12 +1883,12 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
     public func injectRestoreRequest(adamId: Int64, extVersion: Int64 = 0) throws {
         cleanAllRestoreRequests()
         guard let dsid = getOwnerDsid() else {
-            throw NSError(domain: "OpenRestore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Не найден Apple ID в Apple Configurator. Войдите в аккаунт в Configurator."])
+            throw NSError(domain: "OpenStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Не найден Apple ID в Apple Configurator. Войдите в аккаунт в Configurator."])
         }
 
         var db: OpaquePointer?
         if sqlite3_open_v2(Self.defaultDBPath, &db, SQLITE_OPEN_READWRITE, nil) != SQLITE_OK {
-            throw NSError(domain: "OpenRestore", code: 2, userInfo: [NSLocalizedDescriptionKey: "Не удалось открыть базу Apple Configurator."])
+            throw NSError(domain: "OpenStore", code: 2, userInfo: [NSLocalizedDescriptionKey: "Не удалось открыть базу Apple Configurator."])
         }
         defer { sqlite3_close(db) }
 
@@ -1915,7 +1930,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             sqlite3_bind_text(stmt, 7, (buyParams as NSString).utf8String, -1, nil)
 
             if sqlite3_step(stmt) != SQLITE_DONE {
-                throw NSError(domain: "OpenRestore", code: 3, userInfo: [NSLocalizedDescriptionKey: "Ошибка вставки записи в SQLite базу."])
+                throw NSError(domain: "OpenStore", code: 3, userInfo: [NSLocalizedDescriptionKey: "Ошибка вставки записи в SQLite базу."])
             }
         }
     }
@@ -1935,7 +1950,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
     public func executeConfiguratorAutomation(adamId: Int64, appName: String = "") {
         if !isAccessibilityGranted {
-            LogManager.shared.log("⚠️ Внимание: Для автоматических кликов требуется выдать доступ в «Системные настройки → Конфиденциальность → Универсальный доступ» для OpenRestore.", level: "AUTO")
+            LogManager.shared.log("⚠️ Внимание: Для автоматических кликов требуется выдать доступ в «Системные настройки → Конфиденциальность → Универсальный доступ» для Open Store.", level: "AUTO")
             return // Skip AppleScript execution to avoid errors
         }
         
@@ -3126,7 +3141,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
     @MainActor
     public func checkForUpdates(currentVersion: String? = nil) async -> (AppUpdateInfo?, String?) {
-        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.0")
+        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.1")
         self.isCheckingUpdates = true
         self.updateCheckError = nil
 
@@ -3150,9 +3165,9 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
             if httpResponse.statusCode == 404 {
                 let info = AppUpdateInfo(
-                    id: "v1.6.0",
-                    version: "v1.6.0",
-                    title: "OpenRestore v1.6.0",
+                    id: "v1.6.1",
+                    version: "v1.6.1",
+                    title: "Open Store v1.6.1",
                     releaseNotes: "У вас установлена самая свежая версия программы.",
                     downloadUrl: nil,
                     publishedAt: "",
@@ -3179,25 +3194,46 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             let body = (json["body"] as? String) ?? ""
             let pubDate = (json["published_at"] as? String) ?? ""
 
-            var downloadUrl: String? = nil
-            var directAppZipUrl: String? = nil
+            #if arch(arm64)
+            let isArm64 = true
+            #else
+            let isArm64 = false
+            #endif
+
+            var archZipUrl: String? = nil
+            var universalZipUrl: String? = nil
+            var generalZipUrl: String? = nil
+            var dmgUrl: String? = nil
 
             if let assets = json["assets"] as? [[String: Any]] {
                 for asset in assets {
                     if let aName = asset["name"] as? String, let dUrl = asset["browser_download_url"] as? String {
-                        if aName == "OpenRestore.app.zip" {
-                            directAppZipUrl = dUrl
-                        } else if aName.hasSuffix("-macOS.zip") && directAppZipUrl == nil {
-                            directAppZipUrl = dUrl
-                        } else if aName.hasSuffix(".dmg") && downloadUrl == nil {
-                            downloadUrl = dUrl
+                        let lower = aName.lowercased()
+                        if lower.hasSuffix(".zip") {
+                            if isArm64 && (lower.contains("applesilicon") || lower.contains("arm64")) {
+                                archZipUrl = dUrl
+                            } else if !isArm64 && (lower.contains("intel") || lower.contains("x86_64")) {
+                                archZipUrl = dUrl
+                            } else if lower.contains("macos") || lower.contains("universal") || lower.contains(".app.zip") {
+                                if universalZipUrl == nil { universalZipUrl = dUrl }
+                            } else if generalZipUrl == nil && !lower.contains("windows") {
+                                generalZipUrl = dUrl
+                            }
+                        } else if lower.hasSuffix(".dmg") && dmgUrl == nil {
+                            if isArm64 && (lower.contains("applesilicon") || lower.contains("arm64")) {
+                                dmgUrl = dUrl
+                            } else if !isArm64 && (lower.contains("intel") || lower.contains("x86_64")) {
+                                dmgUrl = dUrl
+                            } else if dmgUrl == nil {
+                                dmgUrl = dUrl
+                            }
                         }
                     }
                 }
             }
 
-            // Prefer direct .zip for seamless in-app replacement
-            let finalDownloadUrl = directAppZipUrl ?? downloadUrl ?? (json["html_url"] as? String)
+            // Prefer architecture-specific zip, then universal zip, then generic zip, then dmg
+            let finalDownloadUrl = archZipUrl ?? universalZipUrl ?? generalZipUrl ?? dmgUrl ?? (json["html_url"] as? String)
 
             let cleanTag = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
             let cleanCurrent = actualVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
@@ -3215,7 +3251,12 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             )
 
             self.latestUpdateInfo = updateInfo
-            LogManager.shared.log("🔍 Проверка обновлений: текущая v\(actualVersion), на сервере \(tagName) (новее: \(isNewer))", level: "UPDATE")
+            #if arch(arm64)
+            let currentArch = "Apple Silicon"
+            #else
+            let currentArch = "Intel"
+            #endif
+            LogManager.shared.log("🔍 Проверка обновлений (\(currentArch)): текущая v\(actualVersion), на сервере \(tagName) (новее: \(isNewer))", level: "UPDATE")
             return (updateInfo, nil)
         } catch {
             let errMsg = error.localizedDescription
@@ -3233,11 +3274,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         self.isUpdatingApp = true
         self.updateDownloadProgress = 0.05
         self.updateStatusStage = "Подготовка к скачиванию..."
-        LogManager.shared.log("🚀 Запуск процесса самообновления OpenRestore до \(updateInfo.version)...", level: "UPDATE")
+        LogManager.shared.log("🚀 Запуск процесса самообновления Open Store до \(updateInfo.version)...", level: "UPDATE")
 
         let tempDir = NSTemporaryDirectory()
-        let updateZipPath = "\(tempDir)OpenRestore_update.zip"
-        let extractDir = "\(tempDir)OpenRestore_extracted"
+        let updateZipPath = "\(tempDir)OpenStore_update.zip"
+        let extractDir = "\(tempDir)OpenStore_extracted"
 
         try? FileManager.default.removeItem(atPath: updateZipPath)
         try? FileManager.default.removeItem(atPath: extractDir)
@@ -3292,7 +3333,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
             guard let newAppPath = foundAppPath, fileManager.fileExists(atPath: newAppPath) else {
                 self.isUpdatingApp = false
-                return (false, "Не удалось обнаружить OpenRestore.app в скачанном архиве")
+                return (false, "Не удалось обнаружить приложение в скачанном архиве")
             }
 
             self.updateDownloadProgress = 0.85
@@ -3304,11 +3345,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             if currentBundlePath.hasSuffix(".app") {
                 targetDestPath = currentBundlePath
             } else {
-                targetDestPath = "/Applications/OpenRestore.app"
+                targetDestPath = "/Applications/Open Store.app"
             }
 
             // Create detached updater script
-            let updaterScriptPath = "\(tempDir)openrestore_updater.sh"
+            let updaterScriptPath = "\(tempDir)openstore_updater.sh"
             let scriptContent = """
             #!/bin/bash
             OLD_PID=$1
@@ -3320,25 +3361,30 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                 sleep 0.2
             done
 
-            sleep 0.4
+            sleep 0.5
+
+            DEST_DIR="$(dirname "$DEST_APP")"
+            APP_BASENAME="$(basename "$SRC_APP")"
+            FINAL_DEST="$DEST_DIR/$APP_BASENAME"
 
             # Replace bundle
             rm -rf "$DEST_APP"
-            cp -R "$SRC_APP" "$DEST_APP"
-            xattr -cr "$DEST_APP" 2>/dev/null || true
+            rm -rf "$FINAL_DEST"
+            cp -R "$SRC_APP" "$FINAL_DEST"
+            xattr -cr "$FINAL_DEST" 2>/dev/null || true
 
             # Cleanup
-            rm -rf "$SRC_APP" "$(dirname "$SRC_APP")" "/tmp/OpenRestore_update.zip" 2>/dev/null || true
+            rm -rf "$SRC_APP" "$(dirname "$SRC_APP")" "/tmp/OpenRestore_update.zip" "/tmp/OpenStore_update.zip" 2>/dev/null || true
 
             # Launch updated app
-            open "$DEST_APP"
+            open "$FINAL_DEST"
             """
 
             try scriptContent.write(toFile: updaterScriptPath, atomically: true, encoding: .utf8)
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: updaterScriptPath)
 
             self.updateDownloadProgress = 1.0
-            self.updateStatusStage = "Перезапуск OpenRestore..."
+            self.updateStatusStage = "Перезапуск Open Store..."
 
             let currentPid = ProcessInfo.processInfo.processIdentifier
 
