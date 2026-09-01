@@ -4,10 +4,18 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-echo "Компиляция нативного приложения OpenRestore.app..."
-mkdir -p OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources module_cache
+echo "Компиляция нативного приложения OpenRestore.app (Раздельные Архитектуры)..."
 
-cat << 'PLIST' > OpenRestore.app/Contents/Info.plist
+# Create build functions
+build_app_for_arch() {
+    local arch=$1      # arm64 or x86_64
+    local target_arch=$2 # arm64-apple-macos13.0 or x86_64-apple-macos13.0
+    local app_dir="build_tmp/OpenRestore_${arch}.app"
+    
+    mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources/bin"
+
+    # Copy Info.plist
+    cat << PLIST > "$app_dir/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -42,6 +50,42 @@ cat << 'PLIST' > OpenRestore.app/Contents/Info.plist
 </plist>
 PLIST
 
+    # Compile Swift
+    swiftc -O -parse-as-library -target "$target_arch" \
+      native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
+      -lsqlite3 -o "$app_dir/Contents/MacOS/OpenRestore"
+
+    cp catalog.json "$app_dir/Contents/Resources/catalog.json"
+    if [ -f "AppIcon.icns" ]; then
+      cp AppIcon.icns "$app_dir/Contents/Resources/AppIcon.icns"
+    fi
+
+    # Extract single-architecture binaries from Universal ones
+    if [ -f "bin/ios" ]; then
+      lipo bin/ios -extract "$arch" -output "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || cp bin/ios "$app_dir/Contents/Resources/bin/ios"
+      chmod +x "$app_dir/Contents/Resources/bin/ios"
+      codesign --force --identifier com.openrestore.ios -s - "$app_dir/Contents/Resources/bin/ios"
+    fi
+
+    if [ -f "bin/ipatool" ]; then
+      lipo bin/ipatool -extract "$arch" -output "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || cp bin/ipatool "$app_dir/Contents/Resources/bin/ipatool"
+      chmod +x "$app_dir/Contents/Resources/bin/ipatool"
+      codesign --force --identifier com.openrestore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool"
+    fi
+
+    if [ -f "bin/ios-scanner" ]; then
+      lipo bin/ios-scanner -extract "$arch" -output "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || cp bin/ios-scanner "$app_dir/Contents/Resources/bin/ios-scanner"
+      chmod +x "$app_dir/Contents/Resources/bin/ios-scanner"
+      codesign --force --identifier com.openrestore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner"
+    fi
+
+    xattr -cr "$app_dir"
+    codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - "$app_dir"
+}
+
+rm -rf build_tmp
+mkdir -p build_tmp
+
 cat << 'ENT' > openrestore.entitlements
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -51,53 +95,10 @@ cat << 'ENT' > openrestore.entitlements
 </plist>
 ENT
 
-echo "Компиляция нативного Universal 2 приложения (Apple Silicon arm64 + Intel x86_64)..."
-rm -rf module_cache build_tmp
-mkdir -p build_tmp OpenRestore.app/Contents/MacOS OpenRestore.app/Contents/Resources/bin
+echo "🔨 Сборка для Apple Silicon (arm64)..."
+build_app_for_arch "arm64" "arm64-apple-macos13.0"
 
-swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
-  native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
-  -lsqlite3 -o build_tmp/OpenRestore_arm64
+echo "🔨 Сборка для Intel (x86_64)..."
+build_app_for_arch "x86_64" "x86_64-apple-macos13.0"
 
-swiftc -O -parse-as-library -target x86_64-apple-macos13.0 \
-  native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
-  -lsqlite3 -o build_tmp/OpenRestore_x86_64
-
-lipo -create build_tmp/OpenRestore_arm64 build_tmp/OpenRestore_x86_64 -output OpenRestore.app/Contents/MacOS/OpenRestore
-rm -rf build_tmp
-
-cp catalog.json OpenRestore.app/Contents/Resources/catalog.json
-if [ -f "AppIcon.icns" ]; then
-  cp AppIcon.icns OpenRestore.app/Contents/Resources/AppIcon.icns
-fi
-
-if [ -f "bin/ios" ]; then
-  cp bin/ios OpenRestore.app/Contents/Resources/bin/ios
-  chmod +x OpenRestore.app/Contents/Resources/bin/ios
-fi
-
-if [ -f "bin/ipatool" ]; then
-  cp bin/ipatool OpenRestore.app/Contents/Resources/bin/ipatool
-  chmod +x OpenRestore.app/Contents/Resources/bin/ipatool
-  codesign --force --identifier com.openrestore.ipatool -s - OpenRestore.app/Contents/Resources/bin/ipatool
-fi
-
-if [ -f "bin/ios-scanner" ]; then
-  cp bin/ios-scanner OpenRestore.app/Contents/Resources/bin/ios-scanner
-  chmod +x OpenRestore.app/Contents/Resources/bin/ios-scanner
-  codesign --force --identifier com.openrestore.ios-scanner -s - OpenRestore.app/Contents/Resources/bin/ios-scanner
-fi
-
-if [ -f "bin/ios" ]; then
-  cp bin/ios OpenRestore.app/Contents/Resources/bin/ios
-  chmod +x OpenRestore.app/Contents/Resources/bin/ios
-  codesign --force --identifier com.openrestore.ios -s - OpenRestore.app/Contents/Resources/bin/ios
-fi
-
-xattr -cr OpenRestore.app
-codesign --force --deep --identifier com.openrestore.app --entitlements openrestore.entitlements -s - OpenRestore.app
-
-touch OpenRestore.app
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -trusted OpenRestore.app 2>/dev/null || true
-
-echo "Готово! OpenRestore.app успешно собрано (Universal 2: arm64 + x86_64, Standalone) и подписано."
+echo "Готово! Раздельные приложения находятся в build_tmp/."
