@@ -3028,11 +3028,6 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             return (false, true, "Код подтверждения отправлен на ваши устройства Apple. Введите 6-значный код 2FA.")
         }
 
-        // 4. Fallback: If no code entered yet, prompt 2FA
-        if code == nil || code?.trimmingCharacters(in: .whitespaces).isEmpty == true {
-            return (false, true, "Код подтверждения отправлен на ваши устройства Apple. Введите 6-значный код 2FA.")
-        }
-
         let cleanErr = outStr.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         return (false, false, cleanErr.isEmpty ? "Ошибка входа в Apple ID. Проверьте правильность введенных данных." : cleanErr)
     }

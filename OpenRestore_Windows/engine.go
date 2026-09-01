@@ -270,7 +270,7 @@ func (e *AppEngine) Login(email, password, authCode string) (bool, string) {
 
 	if err != nil {
 		lower := strings.ToLower(outStr)
-		if strings.Contains(lower, "2fa") || strings.Contains(lower, "code") || strings.Contains(lower, "two-factor") || strings.Contains(lower, "verification") || strings.Contains(lower, "required") || strings.Contains(lower, "security") {
+		if strings.Contains(lower, "2fa code is required") || strings.Contains(lower, "two-factor") || strings.Contains(lower, "auth-code") {
 			return false, "NEED_2FA"
 		}
 		
