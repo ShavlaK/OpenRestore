@@ -60,6 +60,7 @@ type AppEngine struct {
 	downloadsDir string
 	clients      map[chan ProgressEvent]bool
 	clientsMu    sync.Mutex
+	LogFile      *os.File
 	currentDevice *DeviceInfo
 	appleID      string
 	appleName    string
@@ -82,10 +83,17 @@ func NewAppEngine() *AppEngine {
 	downloadsDir := filepath.Join(userProfile, "Downloads", "OpenRestore")
 	os.MkdirAll(downloadsDir, 0755)
 
+	logPath := filepath.Join(downloadsDir, "openrestore_windows.log")
+	logFile, _ := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if logFile != nil {
+		logFile.WriteString(fmt.Sprintf("\n======================================================\n  OpenRestore Windows Log — Session: %s\n======================================================\n", time.Now().Format("2006-01-02 15:04:05")))
+	}
+
 	return &AppEngine{
 		binDir:       binDir,
 		downloadsDir: downloadsDir,
 		clients:      make(map[chan ProgressEvent]bool),
+		LogFile:      logFile,
 	}
 }
 
@@ -130,8 +138,7 @@ func (e *AppEngine) Log(msg string, level ...string) {
 	
 	if e.LogFile != nil {
 		timestamp := time.Now().Format("2006-01-02 15:04:05")
-		e.LogFile.WriteString(fmt.Sprintf("[%s] [%s] %s
-", timestamp, lvl, msg))
+		e.LogFile.WriteString(fmt.Sprintf("[%s] [%s] %s\n", timestamp, lvl, msg))
 		e.LogFile.Sync()
 	}
 
