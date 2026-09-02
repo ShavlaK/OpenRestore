@@ -128,6 +128,7 @@ build_universal_app() {
 
 rm -rf build_tmp
 mkdir -p build_tmp
+touch build_tmp/.noindex build_tmp/.metadata_never_index
 
 cat << 'ENT' > openstore.entitlements
 <?xml version="1.0" encoding="UTF-8"?>
@@ -147,9 +148,11 @@ build_app_for_arch "x86_64" "x86_64-apple-macos13.0"
 echo "🔨 Сборка Universal бандла..."
 build_universal_app
 
-# Default local app bundle
+# Clean project folder so Spotlight/Raycast never indexes duplicates
 rm -rf "Open Store.app" "OpenRestore.app"
-cp -R "build_tmp/OpenStore_universal.app" "Open Store.app"
-cp -R "build_tmp/OpenStore_universal.app" "OpenRestore.app"
+echo "📦 Установка актуальной версии в /Applications/Open Store.app..."
+rm -rf "/Applications/Open Store.app"
+cp -R "build_tmp/OpenStore_universal.app" "/Applications/Open Store.app"
+rm -rf build_tmp
 
-echo "Готово! Приложения Open Store.app успешно собраны в build_tmp/."
+echo "Готово! Приложение Open Store.app (v${VERSION}) собрано и установлено в /Applications/."
