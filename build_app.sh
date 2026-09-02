@@ -14,6 +14,8 @@ build_app_for_arch() {
     local target_arch=$2 # arm64-apple-macos13.0 or x86_64-apple-macos13.0
     local app_dir="build_tmp/OpenStore_${arch}.app"
     
+    mkdir -p build_tmp
+    touch build_tmp/.noindex build_tmp/.metadata_never_index
     mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources/bin"
 
     # Copy Info.plist

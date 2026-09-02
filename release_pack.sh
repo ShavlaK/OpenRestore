@@ -100,6 +100,9 @@ echo "🔐 Вычисление контрольных сумм SHA256..."
     done
 )
 
+# 9. Clean intermediate build directories so macOS LaunchServices/Spotlight never registers ghosts
+rm -rf "build_tmp" "$RELEASE_DIR"
+
 echo "=========================================="
 echo "🎉 Релизы Open Store v${VERSION} успешно собраны в папке dist/!"
 ls -lh "$DIST_DIR" | grep -E '\.dmg|\.zip'
