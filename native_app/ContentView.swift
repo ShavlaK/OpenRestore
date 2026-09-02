@@ -2888,6 +2888,12 @@ struct ContentView: View {
             return
         }
 
+        guard engine.activeDevice?.isOnline == true || !engine.connectedDevices.isEmpty else {
+            alertMessage = "iPhone не подключен!\nПожалуйста, подключите устройство по USB-кабелю, разблокируйте экран и нажмите «Доверять этому компьютеру»."
+            showAlert = true
+            return
+        }
+
         restoringAdamId = 0
         restoringAppName = name
         shouldInstallAfterDownload = true
@@ -2898,7 +2904,7 @@ struct ContentView: View {
         engine.operationStage = "Инициализация установки «\(name)»..."
         isRestoring = true
 
-        let targetUdid = engine.activeDevice?.udid ?? ""
+        let targetUdid = (engine.connectedDevices.first(where: { $0.connectionType == .usb && $0.isOnline }) ?? engine.connectedDevices.first(where: { $0.isOnline }) ?? engine.activeDevice)?.udid ?? ""
 
         Task {
             let (ok, msg) = await engine.installApp(ipaPath: ipaPath, udid: targetUdid)

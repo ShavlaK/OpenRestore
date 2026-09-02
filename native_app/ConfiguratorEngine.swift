@@ -402,14 +402,23 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
 
     public var activeDevice: DeviceInfo? {
         if !selectedDeviceId.isEmpty {
-            if let d = connectedDevices.first(where: { $0.id == selectedDeviceId }) {
+            if let d = connectedDevices.first(where: { $0.id == selectedDeviceId && $0.isOnline }) {
                 return d
             }
+        }
+        // Always prioritize currently connected physical USB devices
+        if let usb = connectedDevices.first(where: { $0.connectionType == .usb && $0.isOnline }) {
+            return usb
+        }
+        if let anyConnected = connectedDevices.first(where: { $0.isOnline }) {
+            return anyConnected
+        }
+        if !selectedDeviceId.isEmpty {
             if let d = knownDevices.first(where: { $0.id == selectedDeviceId }) {
                 return d
             }
         }
-        return connectedDevices.first(where: { $0.connectionType == .usb }) ?? connectedDevices.first ?? knownDevices.first
+        return knownDevices.first
     }
 
     @Published public var purchasedApps: [PurchasedApp] = []
@@ -1225,23 +1234,54 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         let iosBin = StandaloneToolchain.shared.iosBinaryPath
         var discoveredMap: [String: DeviceInfo] = [:]
 
-        // LAYER 1: ios list --details (fast go-ios lockdown query)
-        if FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0)
-            if status == 0 && !data.isEmpty {
-                var jsonDict: [String: Any]? = nil
-                if let directDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    jsonDict = directDict
-                } else if let rawString = String(data: data, encoding: .utf8),
-                          let startIdx = rawString.firstIndex(of: "{"),
-                          let endIdx = rawString.lastIndex(of: "}") {
-                    let sub = String(rawString[startIdx...endIdx])
-                    if let subData = sub.data(using: .utf8) {
-                        jsonDict = try? JSONSerialization.jsonObject(with: subData) as? [String: Any]
+        // LAYER 0: Apple Configurator (cfgutil --format json list) - Fastest, official Apple system service
+        if FileManager.default.isExecutableFile(atPath: Self.cfgutilPath) {
+            let (status, data) = Self.runProcessWithSafeOutput(executable: Self.cfgutilPath, arguments: ["--format", "json", "list"], timeout: 3.5)
+            if status == 0 && !data.isEmpty,
+               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+               let output = json["Output"] as? [String: Any] {
+                for (_, devVal) in output {
+                    if let d = devVal as? [String: Any] {
+                        let udid = (d["UDID"] as? String) ?? ""
+                        guard !udid.isEmpty else { continue }
+                        let rawName = (d["name"] as? String) ?? "iPhone"
+                        let devType = (d["deviceType"] as? String) ?? "iPhone"
+                        let ecid = (d["ECID"] as? String) ?? ""
+                        let marketingName = Self.mapMarketingName(devType, modelNumber: "")
+
+                        var devName = rawName
+                        if (devName == "iPhone" || devName.isEmpty), let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty {
+                            devName = known.name
+                        }
+
+                        discoveredMap[udid] = DeviceInfo(
+                            name: devName,
+                            ownerName: Self.extractOwnerName(from: devName),
+                            modelIdentifier: devType,
+                            marketingName: marketingName.isEmpty ? devName : marketingName,
+                            iosVersion: "iOS",
+                            udid: udid,
+                            ecid: ecid,
+                            connectionType: .usb,
+                            isOnline: true,
+                            lastSeen: Date()
+                        )
                     }
                 }
+            }
+        }
 
-                if let deviceList = jsonDict?["deviceList"] as? [[String: Any]], !deviceList.isEmpty {
+        // LAYER 1: ios list --details (go-ios lockdown query with NDJSON resilience)
+        if FileManager.default.isExecutableFile(atPath: iosBin) {
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            if status == 0 && !data.isEmpty, let rawString = String(data: data, encoding: .utf8) {
+                for line in rawString.components(separatedBy: .newlines) {
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmed.starts(with: "{"), trimmed.contains("\"deviceList\""),
+                          let lineData = trimmed.data(using: .utf8),
+                          let jsonDict = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any],
+                          let deviceList = jsonDict["deviceList"] as? [[String: Any]], !deviceList.isEmpty else { continue }
+
                     for d in deviceList {
                         let udid = (d["Udid"] as? String) ?? ""
                         guard !udid.isEmpty else { continue }
@@ -1255,11 +1295,14 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         let fallbackName = marketingName.isEmpty ? "iPhone" : marketingName
 
                         var devName = fallbackName
-                        if let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty, known.name != "iPhone" {
+                        if let existing = discoveredMap[udid], !existing.name.isEmpty && existing.name != "iPhone" {
+                            devName = existing.name
+                        } else if let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty, known.name != "iPhone" {
                             devName = known.name
                         }
 
                         let iosVersion = productVer.isEmpty ? "iOS" : (productVer.starts(with: "iOS") ? productVer : "iOS \(productVer)")
+                        let existingEcid = discoveredMap[udid]?.ecid ?? ""
 
                         let newDev = DeviceInfo(
                             name: devName,
@@ -1270,7 +1313,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                             diskCapacity: "",
                             battery: "",
                             udid: udid,
-                            ecid: "",
+                            ecid: existingEcid,
                             serialNumber: "",
                             wifiAddress: "",
                             connectionType: connType,
@@ -1281,6 +1324,15 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         if let existing = discoveredMap[udid] {
                             if existing.connectionType != .usb && connType == .usb {
                                 discoveredMap[udid] = newDev
+                            } else {
+                                var merged = existing
+                                if merged.iosVersion == "iOS" && iosVersion != "iOS" {
+                                    merged.iosVersion = iosVersion
+                                }
+                                if merged.modelIdentifier.isEmpty || merged.modelIdentifier == "iPhone" {
+                                    merged.modelIdentifier = productType
+                                }
+                                discoveredMap[udid] = merged
                             }
                         } else {
                             discoveredMap[udid] = newDev
@@ -1290,91 +1342,96 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             }
         }
 
-        // LAYER 2: Fallback to simple `ios list` (returns raw list of UDIDs) if Layer 1 was empty
+        // LAYER 2: Fallback to simple `ios list`
         if discoveredMap.isEmpty && FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list"], timeout: 4.0)
-            if status == 0 && !data.isEmpty {
-                var udidList: [String] = []
-                if let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                   let list = dict["deviceList"] as? [String] {
-                    udidList = list
-                } else if let arr = (try? JSONSerialization.jsonObject(with: data)) as? [String] {
-                    udidList = arr
-                }
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list"], timeout: 4.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            if status == 0 && !data.isEmpty, let rawString = String(data: data, encoding: .utf8) {
+                for line in rawString.components(separatedBy: .newlines) {
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmed.starts(with: "{"), trimmed.contains("\"deviceList\""),
+                          let lineData = trimmed.data(using: .utf8),
+                          let dict = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any],
+                          let udidList = dict["deviceList"] as? [String], !udidList.isEmpty else { continue }
 
-                for udid in udidList where !udid.isEmpty {
-                    var devName = "iPhone"
-                    var mName = "iPhone"
-                    var mId = "iPhone"
-                    var iVer = "iOS"
-                    if let known = currentKnown.first(where: { $0.udid == udid }) {
-                        devName = known.name
-                        mName = known.marketingName
-                        mId = known.modelIdentifier
-                        iVer = known.iosVersion
+                    for udid in udidList where !udid.isEmpty {
+                        var devName = "iPhone"
+                        var mName = "iPhone"
+                        var mId = "iPhone"
+                        var iVer = "iOS"
+                        if let known = currentKnown.first(where: { $0.udid == udid }) {
+                            devName = known.name
+                            mName = known.marketingName
+                            mId = known.modelIdentifier
+                            iVer = known.iosVersion
+                        }
+
+                        discoveredMap[udid] = DeviceInfo(
+                            name: devName,
+                            ownerName: Self.extractOwnerName(from: devName),
+                            modelIdentifier: mId,
+                            marketingName: mName,
+                            iosVersion: iVer,
+                            udid: udid,
+                            connectionType: .usb,
+                            isOnline: true,
+                            lastSeen: Date()
+                        )
                     }
-
-                    discoveredMap[udid] = DeviceInfo(
-                        name: devName,
-                        ownerName: Self.extractOwnerName(from: devName),
-                        modelIdentifier: mId,
-                        marketingName: mName,
-                        iosVersion: iVer,
-                        udid: udid,
-                        connectionType: .usb,
-                        isOnline: true,
-                        lastSeen: Date()
-                    )
                 }
             }
         }
 
-        // LAYER 3: Native macOS ioreg fallback for physical USB-connected iOS devices
+        // LAYER 3: Native macOS ioreg fallback for physical USB-connected iOS devices (Order-independent)
         if discoveredMap.isEmpty {
             let (ioregStatus, ioregData) = Self.runProcessWithSafeOutput(executable: "/usr/sbin/ioreg", arguments: ["-p", "IOUSB", "-l", "-w", "0"], timeout: 3.0)
             if ioregStatus == 0, let ioregStr = String(data: ioregData, encoding: .utf8) {
-                let lines = ioregStr.components(separatedBy: "\n")
-                var currentProd = ""
-                for line in lines {
-                    if line.contains("\"kUSBProductString\"") {
-                        if line.contains("iPhone") { currentProd = "iPhone" }
-                        else if line.contains("iPad") { currentProd = "iPad" }
-                        else { currentProd = "" }
-                    }
-                    if !currentProd.isEmpty && line.contains("\"kUSBSerialNumberString\"") {
-                        let parts = line.components(separatedBy: "=")
-                        if parts.count > 1 {
-                            let rawSerial = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"\r\n\t"))
-                            if !rawSerial.isEmpty && rawSerial.count >= 16 {
-                                var formattedUdid = rawSerial
-                                if formattedUdid.count == 24 && !formattedUdid.contains("-") {
-                                    let prefix = String(formattedUdid.prefix(8))
-                                    let suffix = String(formattedUdid.suffix(16))
-                                    formattedUdid = "\(prefix)-\(suffix)"
-                                }
+                let blocks = ioregStr.components(separatedBy: "+-o ")
+                for block in blocks {
+                    let isAppleDevice = block.contains("\"kUSBVendorString\" = \"Apple Inc.\"") || block.contains("\"USB Vendor Name\" = \"Apple Inc.\"") || block.contains("\"idVendor\" = 1452")
+                    guard isAppleDevice else { continue }
 
-                                var devName = currentProd
-                                var mName = currentProd
-                                if let known = currentKnown.first(where: { $0.udid == formattedUdid || $0.udid == rawSerial }) {
-                                    devName = known.name
-                                    mName = known.marketingName
-                                }
+                    var prodName = ""
+                    if block.contains("iPhone") { prodName = "iPhone" }
+                    else if block.contains("iPad") { prodName = "iPad" }
+                    else { continue }
 
-                                discoveredMap[formattedUdid] = DeviceInfo(
-                                    name: devName,
-                                    ownerName: Self.extractOwnerName(from: devName),
-                                    modelIdentifier: currentProd,
-                                    marketingName: mName,
-                                    iosVersion: "iOS",
-                                    udid: formattedUdid,
-                                    connectionType: .usb,
-                                    isOnline: true,
-                                    lastSeen: Date()
-                                )
+                    var rawSerial = ""
+                    for line in block.components(separatedBy: "\n") {
+                        if line.contains("\"kUSBSerialNumberString\"") || line.contains("\"USB Serial Number\"") {
+                            let parts = line.components(separatedBy: "=")
+                            if parts.count > 1 {
+                                rawSerial = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"\r\n\t"))
+                                break
                             }
                         }
-                        currentProd = ""
                     }
+
+                    guard !rawSerial.isEmpty && rawSerial.count >= 16 else { continue }
+                    var formattedUdid = rawSerial
+                    if formattedUdid.count == 24 && !formattedUdid.contains("-") {
+                        let prefix = String(formattedUdid.prefix(8))
+                        let suffix = String(formattedUdid.suffix(16))
+                        formattedUdid = "\(prefix)-\(suffix)"
+                    }
+
+                    var devName = prodName
+                    var mName = prodName
+                    if let known = currentKnown.first(where: { $0.udid == formattedUdid || $0.udid == rawSerial }) {
+                        devName = known.name
+                        mName = known.marketingName
+                    }
+
+                    discoveredMap[formattedUdid] = DeviceInfo(
+                        name: devName,
+                        ownerName: Self.extractOwnerName(from: devName),
+                        modelIdentifier: prodName,
+                        marketingName: mName,
+                        iosVersion: "iOS",
+                        udid: formattedUdid,
+                        connectionType: .usb,
+                        isOnline: true,
+                        lastSeen: Date()
+                    )
                 }
             }
         }
@@ -1385,20 +1442,27 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 guard let self = self else { return }
                 for dev in devicesToEnrich where dev.name == "iPhone" || dev.name == "iPad" {
-                    let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(dev.udid)"], timeout: 4.0)
-                    if nameStatus == 0,
-                       let nameJson = (try? JSONSerialization.jsonObject(with: nameData)) as? [String: Any],
-                       let fetched = nameJson["devicename"] as? String, !fetched.isEmpty, fetched != "iPhone" && fetched != "iPad" {
-                        DispatchQueue.main.async {
-                            if let idx = self.connectedDevices.firstIndex(where: { $0.udid == dev.udid }) {
-                                self.connectedDevices[idx].name = fetched
-                                self.connectedDevices[idx].ownerName = Self.extractOwnerName(from: fetched)
+                    let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(dev.udid)"], timeout: 4.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                    if nameStatus == 0, let rawName = String(data: nameData, encoding: .utf8) {
+                        for line in rawName.components(separatedBy: .newlines) {
+                            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard trimmed.starts(with: "{"), trimmed.contains("\"devicename\""),
+                                  let lineD = trimmed.data(using: .utf8),
+                                  let nameJson = (try? JSONSerialization.jsonObject(with: lineD)) as? [String: Any],
+                                  let fetched = nameJson["devicename"] as? String, !fetched.isEmpty, fetched != "iPhone" && fetched != "iPad" else { continue }
+
+                            DispatchQueue.main.async {
+                                if let idx = self.connectedDevices.firstIndex(where: { $0.udid == dev.udid }) {
+                                    self.connectedDevices[idx].name = fetched
+                                    self.connectedDevices[idx].ownerName = Self.extractOwnerName(from: fetched)
+                                }
+                                if let kIdx = self.knownDevices.firstIndex(where: { $0.udid == dev.udid }) {
+                                    self.knownDevices[kIdx].name = fetched
+                                    self.knownDevices[kIdx].ownerName = Self.extractOwnerName(from: fetched)
+                                    self.saveKnownDevices()
+                                }
                             }
-                            if let kIdx = self.knownDevices.firstIndex(where: { $0.udid == dev.udid }) {
-                                self.knownDevices[kIdx].name = fetched
-                                self.knownDevices[kIdx].ownerName = Self.extractOwnerName(from: fetched)
-                                self.saveKnownDevices()
-                            }
+                            break
                         }
                     }
                 }
@@ -1426,12 +1490,12 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             var discovered: [DeviceInstalledApp] = []
             let userMappings = self.loadUserMappings()
 
-            var targetUdid = self.activeDevice?.udid ?? ""
-            if targetUdid.isEmpty {
-                targetUdid = self.connectedDevices.first(where: { $0.connectionType == .usb })?.udid
-                    ?? self.connectedDevices.first?.udid ?? ""
-            }
-            if targetUdid.isEmpty && FileManager.default.isExecutableFile(atPath: iosBin) {
+            var targetUdid = ""
+            if let onlineUsb = self.connectedDevices.first(where: { $0.connectionType == .usb && $0.isOnline }) ?? self.connectedDevices.first(where: { $0.isOnline }) {
+                targetUdid = onlineUsb.udid
+            } else if let active = self.activeDevice, active.isOnline {
+                targetUdid = active.udid
+            } else {
                 let online = self.getConnectedDevicesDetails()
                 targetUdid = online.first(where: { $0.connectionType == .usb })?.udid ?? online.first?.udid ?? ""
             }
@@ -2665,8 +2729,22 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             self.operationStage = "Проверка пакета «\(appFilename)»..."
         }
 
+        var targetUdid = !udid.isEmpty ? udid : (activeDevice?.udid ?? "")
+        // If target UDID is empty or points to an offline device, but an online device is connected, prefer the online device!
+        if let onlineUsb = connectedDevices.first(where: { $0.connectionType == .usb && $0.isOnline }) ?? connectedDevices.first(where: { $0.isOnline }) {
+            if targetUdid.isEmpty || connectedDevices.allSatisfy({ $0.udid != targetUdid }) {
+                targetUdid = onlineUsb.udid
+            }
+        }
+
+        guard !targetUdid.isEmpty || !connectedDevices.isEmpty || (activeDevice?.isOnline == true) else {
+            LogManager.shared.log("❌ iPhone не обнаружен по USB! Подключите устройство кабелем и разблокируйте экран.", level: "INSTALL")
+            appendLog("❌ Устройство не обнаружено по USB. Подключите iPhone и разблокируйте экран.")
+            return (false, "iPhone не обнаружен по USB. Подключите кабель, разблокируйте экран и нажмите «Доверять этому компьютеру».")
+        }
+
         let iosBin = StandaloneToolchain.shared.iosBinaryPath
-        let targetUdid = !udid.isEmpty ? udid : (activeDevice?.udid ?? "")
+        var lastErrorOutput = ""
 
         if FileManager.default.isExecutableFile(atPath: iosBin) {
             DispatchQueue.main.async {
@@ -2693,33 +2771,55 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                 }
             }
 
-            let (status, data) = Self.runProcessWithLiveOutput(executable: iosBin, arguments: args, timeout: 600.0, onOutput: onProgress)
+            let (status, data) = Self.runProcessWithLiveOutput(executable: iosBin, arguments: args, timeout: 600.0, env: ["ENABLE_GO_IOS_AGENT": "user"], onOutput: onProgress)
             let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            lastErrorOutput = output
 
-            do {
-                let procTerminationStatus = status
-
+            if status == 0 {
                 DispatchQueue.main.async {
                     self.operationProgress = 1.0
-                    self.operationStage = procTerminationStatus == 0 ? "Установка завершена успешно!" : "Ошибка установки"
+                    self.operationStage = "Установка завершена успешно!"
                 }
-
-                if procTerminationStatus == 0 {
-                    LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через go-ios!", level: "INSTALL")
-                    appendLog("🎉 «\(appFilename)» успешно установлено на iPhone!")
-                    return (true, "Приложение успешно установлено на iPhone!")
-                } else {
-                    LogManager.shared.log("❌ Ошибка установки go-ios: \(output)", level: "INSTALL")
-                    appendLog("❌ Ошибка: \(output)")
-                    return (false, output.isEmpty ? "Ошибка установки" : output)
-                }
-            } catch {
-                LogManager.shared.log("❌ Ошибка запуска go-ios: \(error.localizedDescription)", level: "INSTALL")
-                appendLog("❌ Ошибка: \(error.localizedDescription)")
-                return (false, error.localizedDescription)
+                LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через go-ios!", level: "INSTALL")
+                appendLog("🎉 «\(appFilename)» успешно установлено на iPhone!")
+                return (true, "Приложение успешно установлено на iPhone!")
+            } else {
+                LogManager.shared.log("⚠️ go-ios сообщил об ошибке: \(output). Пробуем резервный способ установки...", level: "INSTALL")
+                appendLog("⚠️ Переключение на резервный сервис установки...")
             }
         }
 
+        // Fallback 1: Apple Configurator (cfgutil install-app)
+        if FileManager.default.isExecutableFile(atPath: Self.cfgutilPath) {
+            DispatchQueue.main.async {
+                self.operationProgress = 0.75
+                self.operationStage = "Установка через Apple Configurator (cfgutil)..."
+            }
+            appendLog("📲 Передача приложения в системную службу Apple Configurator...")
+
+            var cfgArgs = ["install-app", ipaPath]
+            if let ecid = activeDevice?.ecid, !ecid.isEmpty {
+                cfgArgs.insert(contentsOf: ["-e", ecid], at: 1)
+            }
+
+            let (cfgStatus, cfgData) = Self.runProcessWithSafeOutput(executable: Self.cfgutilPath, arguments: cfgArgs, timeout: 600.0)
+            let cfgOutput = String(data: cfgData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            if cfgStatus == 0 {
+                DispatchQueue.main.async {
+                    self.operationProgress = 1.0
+                    self.operationStage = "Установка завершена успешно!"
+                }
+                LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через Apple Configurator!", level: "INSTALL")
+                appendLog("🎉 «\(appFilename)» успешно установлено на iPhone!")
+                return (true, "Приложение успешно установлено на iPhone!")
+            } else {
+                LogManager.shared.log("⚠️ Ошибка cfgutil: \(cfgOutput)", level: "INSTALL")
+                if !cfgOutput.isEmpty { lastErrorOutput = cfgOutput }
+            }
+        }
+
+        // Fallback 2: python ios_core.py install
         let coreScript = "\(Self.workDir)/ios_core.py"
         if FileManager.default.isExecutableFile(atPath: coreScript) {
             let proc = Process()
@@ -2756,7 +2856,13 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             }
         }
 
-        return (false, "Утилита установки не найдена")
+        DispatchQueue.main.async {
+            self.operationProgress = 1.0
+            self.operationStage = "Ошибка установки"
+        }
+        LogManager.shared.log("❌ Не удалось установить приложение «\(appFilename)» всеми доступными методами: \(lastErrorOutput)", level: "INSTALL")
+        appendLog("❌ Ошибка установки: \(lastErrorOutput)")
+        return (false, lastErrorOutput.isEmpty ? "Ошибка установки" : lastErrorOutput)
     }
 
     public func uninstallApp(bundleId: String) async -> (Bool, String) {

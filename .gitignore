@@ -40,3 +40,6 @@ Downloads/
 OpenRestore_Library/
 OpenRestore.app/
 Open Store.app/
+
+# Agent local skills
+.agent/
