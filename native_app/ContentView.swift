@@ -2470,7 +2470,7 @@ struct ContentView: View {
                         .padding(12)
                     }
                 }
-                .frame(width: 270)
+                .frame(width: 300)
                 .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
 
                 Divider()
@@ -2556,22 +2556,43 @@ struct ContentView: View {
                             )
 
                             // Specs Card
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Характеристики и параметры")
-                                    .font(.system(size: 12, weight: .bold, design: .rounded))
-
-                                VStack(spacing: 8) {
-                                    deviceInfoRow(label: "Владелец", value: dev.ownerName)
-                                    deviceInfoRow(label: "Имя устройства", value: dev.name)
-                                    deviceInfoRow(label: "Модель", value: "\(dev.marketingName) (\(dev.modelIdentifier))")
-                                    deviceInfoRow(label: "Версия системы", value: dev.iosVersion)
-                                    deviceInfoRow(label: "Тип связи", value: dev.connectionType == .usb ? "USB-кабель (Прямой канал)" : (dev.connectionType == .wifi ? "Wi-Fi сеть (Беспроводная синхронизация)" : "Отключено"))
-                                    if !dev.battery.isEmpty { deviceInfoRow(label: "Уровень заряда", value: dev.battery) }
-                                    if !dev.diskCapacity.isEmpty { deviceInfoRow(label: "Память накопителя", value: dev.diskCapacity) }
-                                    if !dev.serialNumber.isEmpty { deviceInfoRow(label: "Серийный номер", value: dev.serialNumber) }
-                                    if !dev.wifiAddress.isEmpty { deviceInfoRow(label: "Wi-Fi MAC-адрес", value: dev.wifiAddress) }
-                                    deviceInfoRow(label: "UDID", value: dev.udid)
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("Характеристики и параметры")
+                                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    Spacer()
                                 }
+
+                                VStack(alignment: .leading, spacing: 0) {
+                                    deviceInfoRow(label: "Владелец", value: dev.ownerName)
+                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    deviceInfoRow(label: "Имя устройства", value: dev.name)
+                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    deviceInfoRow(label: "Модель", value: "\(dev.marketingName) (\(dev.modelIdentifier))")
+                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    deviceInfoRow(label: "Версия системы", value: dev.iosVersion)
+                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    deviceInfoRow(label: "Тип связи", value: dev.connectionType == .usb ? "USB-кабель (Прямой канал)" : (dev.connectionType == .wifi ? "Wi-Fi сеть (Беспроводная синхронизация)" : "Отключено"))
+                                    if !dev.battery.isEmpty {
+                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        deviceInfoRow(label: "Уровень заряда", value: dev.battery)
+                                    }
+                                    if !dev.diskCapacity.isEmpty {
+                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        deviceInfoRow(label: "Память накопителя", value: dev.diskCapacity)
+                                    }
+                                    if !dev.serialNumber.isEmpty {
+                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        deviceInfoRow(label: "Серийный номер", value: dev.serialNumber, isMonospaced: true)
+                                    }
+                                    if !dev.wifiAddress.isEmpty {
+                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        deviceInfoRow(label: "Wi-Fi MAC-адрес", value: dev.wifiAddress, isMonospaced: true)
+                                    }
+                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    deviceInfoRow(label: "UDID", value: dev.udid, isMonospaced: true)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .padding(14)
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -2655,7 +2676,7 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(width: 760, height: 540)
+        .frame(width: 820, height: 570)
     }
 
     private func deviceListCard(dev: DeviceInfo, isOnline: Bool) -> some View {
@@ -2699,10 +2720,12 @@ struct ContentView: View {
                         Text(dev.ownerName)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.blue)
+                            .lineLimit(1)
                         Text("•").foregroundColor(.secondary).font(.system(size: 9))
                         Text(dev.iosVersion)
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
                 }
 
@@ -2739,16 +2762,18 @@ struct ContentView: View {
         return df.string(from: date)
     }
 
-    private func deviceInfoRow(label: String, value: String) -> some View {
-        HStack {
+    private func deviceInfoRow(label: String, value: String, isMonospaced: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 12) {
             Text(label)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.secondary)
                 .frame(width: 140, alignment: .leading)
+            
             Text(value)
-                .font(.system(size: 12, design: .monospaced))
+                .font(isMonospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
+                .foregroundColor(.primary)
                 .textSelection(.enabled)
-                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
