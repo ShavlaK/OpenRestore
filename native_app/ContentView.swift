@@ -62,9 +62,9 @@ public enum InstallEngineMode: String, CaseIterable, Identifiable {
     public var title: String {
         switch self {
         case .direct:
-            return "Прямой нативный (go-ios + ipatool)"
+            return "Прямой нативный (Open Store Core)"
         case .configurator:
-            return "Apple Configurator"
+            return "Резервная системная служба"
         }
     }
 
@@ -176,6 +176,7 @@ struct ContentView: View {
     @State private var appleIdAuthError: String = ""
     @State private var appleIdAuthSuccess: String = ""
     @State private var isPasswordVisible: Bool = false
+    @State private var vpnNoticeDismissed: Bool = false
 
     @State private var selectedSavedIPAPaths: Set<String> = []
     @State private var savedIPASearchQuery: String = ""
@@ -272,6 +273,11 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.windowBackgroundColor).opacity(0.65))
             }
+
+            if engine.isMandatoryUpdateInProgress {
+                mandatoryUpdateOverlay
+                    .transition(.opacity)
+            }
         }
         .frame(minWidth: 940, minHeight: 620)
         .preferredColorScheme(preferredScheme)
@@ -281,6 +287,9 @@ struct ContentView: View {
             engine.refreshDevices()
             engine.refreshPurchasedApps()
             engine.scanInstalledAppsFromDevice(catalog: catalogApps)
+            Task {
+                await engine.checkAndApplyMandatoryUpdate()
+            }
         }
         .sheet(isPresented: $isRestoring)              { restoreProgressSheet }
         .sheet(isPresented: $showManualAdamIdDialog)    { manualAdamIdSheet }
@@ -408,11 +417,11 @@ struct ContentView: View {
 
                         VStack(alignment: .leading, spacing: 1) {
                             if let dev = activeDev {
-                                Text(dev.marketingName.isEmpty ? dev.name : dev.marketingName)
+                                Text(dev.formattedDisplayName)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(.primary)
                                     .lineLimit(1)
-                                Text("\(dev.ownerName) • \(dev.iosVersion)")
+                                Text("\(dev.modelIdentifier) • \(dev.iosVersion)")
                                     .font(.system(size: 9))
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
@@ -519,7 +528,7 @@ struct ContentView: View {
                         .foregroundColor(currentEngineMode == .direct ? .blue : .orange)
                         .frame(width: 16)
 
-                    Text(currentEngineMode == .direct ? "Прямой нативный (go-ios)" : "Apple Configurator")
+                    Text(currentEngineMode == .direct ? "Прямой нативный (Open Store Core)" : "Резервная служба Apple")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.primary)
 
@@ -618,6 +627,10 @@ struct ContentView: View {
     @ViewBuilder
     private var detailContentView: some View {
         VStack(spacing: 0) {
+            if engine.isVpnActive && !vpnNoticeDismissed {
+                vpnTopNoticeBanner
+            }
+
             switch selectedSidebar {
             case .device:    oldDeviceAppsView
             case .purchases: purchasedAppsView
@@ -1497,7 +1510,7 @@ struct ContentView: View {
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(spacing: 6) {
-                                        Text("⚡ Прямой нативный режим (go-ios + ipatool)")
+                                        Text("⚡ Прямой нативный режим (Open Store Core)")
                                             .font(.system(size: 13, weight: .semibold))
                                             .foregroundColor(.primary)
 
@@ -1509,7 +1522,7 @@ struct ContentView: View {
                                             .background(Capsule().fill(Color.blue))
                                     }
 
-                                    Text("Молниеносная установка за 2–3 секунды в фоновом режиме через системный сервис installation_proxy iOS. Не требует запуска Apple Configurator, AppleScript и разрешений системы.")
+                                    Text("Молниеносная установка за 2–3 секунды в фоновом режиме через системный сервис iOS. Не требует запуска сторонних утилит, AppleScript и разрешений системы.")
                                         .font(.system(size: 11))
                                         .foregroundColor(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -1683,7 +1696,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Текущая версия: Open Store v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.1")")
+                                Text("Текущая версия: Open Store v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.2")")
                                     .font(.system(size: 13, weight: .bold))
                                 Text("Проверка релизов на GitHub в реальном времени.")
                                     .font(.system(size: 11))
@@ -1894,6 +1907,10 @@ struct ContentView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 16) {
+                if engine.isVpnActive {
+                    vpnWarningBanner
+                }
+
                 if engine.isDirectAppleIdAuthenticated && !engine.activeAppleIdEmail.isEmpty {
                     // Authenticated Card
                     HStack(spacing: 14) {
@@ -2485,7 +2502,7 @@ struct ContentView: View {
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(spacing: 8) {
-                                        Text(dev.marketingName.isEmpty ? dev.name : dev.marketingName)
+                                        Text(dev.formattedDisplayName)
                                             .font(.system(size: 15, weight: .bold, design: .rounded))
 
                                         // Connection Type Badge
@@ -2662,7 +2679,7 @@ struct ContentView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
-                        Text(dev.name)
+                        Text(dev.formattedDisplayName)
                             .font(.system(size: 12, weight: isActive ? .bold : .medium))
                             .foregroundColor(.primary)
                             .lineLimit(1)
@@ -3174,5 +3191,146 @@ struct ContentView: View {
         let df = DateFormatter()
         df.dateFormat = "dd.MM.yyyy"
         return df.string(from: date)
+    }
+
+    // MARK: - VPN Warning Banners
+    private var vpnTopNoticeBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.orange)
+
+            Text("⚠️ «Обнаружен активный VPN. Это может приводить к ошибкам авторизации Apple ID, задержкам кодов 2FA и снижению скорости скачивания, а также существует вероятность временной блокировки аккаунта Apple ID со стороны системы безопасности Apple. При возникновении сбоев рекомендуется временно отключить VPN».")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.primary)
+                .lineLimit(2)
+
+            Spacer()
+
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    vpnNoticeDismissed = true
+                }
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12))
+        .overlay(Rectangle().fill(Color.orange.opacity(0.25)).frame(height: 1), alignment: .bottom)
+    }
+
+    private var vpnWarningBanner: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.orange)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Обнаружен активный VPN")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.orange)
+
+                Text("⚠️ «Обнаружен активный VPN. Это может приводить к ошибкам авторизации Apple ID, задержкам кодов 2FA и снижению скорости скачивания, а также существует вероятность временной блокировки аккаунта Apple ID со стороны системы безопасности Apple. При возникновении сбоев рекомендуется временно отключить VPN».")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Mandatory Update Screen
+    private var mandatoryUpdateOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.85)
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(colors: [Color.teal.opacity(0.35), Color.clear], center: .center, startRadius: 20, endRadius: 75))
+                        .frame(width: 150, height: 150)
+
+                    if let iconUrl = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+                       let iconImage = NSImage(contentsOf: iconUrl) {
+                        Image(nsImage: iconImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 84, height: 84)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .shadow(color: .teal.opacity(0.4), radius: 15, x: 0, y: 5)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                            .font(.system(size: 72))
+                            .foregroundColor(.teal)
+                            .shadow(color: .teal.opacity(0.5), radius: 15)
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    Text("Open Store")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+
+                    Text("Обязательное обновление системы")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.75))
+
+                    if !engine.mandatoryUpdateNewVersion.isEmpty {
+                        Text("Версия \(engine.mandatoryUpdateNewVersion)")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 3)
+                            .background(Color.teal.opacity(0.2))
+                            .foregroundColor(.teal)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.teal.opacity(0.4), lineWidth: 1))
+                    }
+                }
+
+                VStack(spacing: 12) {
+                    ProgressView(value: engine.mandatoryUpdateProgress, total: 1.0)
+                        .progressViewStyle(.linear)
+                        .tint(.teal)
+                        .frame(width: 320)
+
+                    HStack {
+                        Text(engine.mandatoryUpdateStage.isEmpty ? engine.updateStatusStage : engine.mandatoryUpdateStage)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(Int(engine.mandatoryUpdateProgress * 100))%")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(.teal)
+                    }
+                    .frame(width: 320)
+                }
+
+                Text("Приложение перезапустится автоматически после завершения установки.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(32)
+            .background(Color(NSColor.windowBackgroundColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.5), radius: 30, x: 0, y: 15)
+        }
     }
 }

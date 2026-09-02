@@ -62,6 +62,8 @@ func main() {
 	// Cleanup background processes before exiting
 	fmt.Println("Cleaning up background processes...")
 	if runtime.GOOS == "windows" {
+		exec.Command("taskkill", "/F", "/IM", "os-store-helper.exe", "/T").Run()
+		exec.Command("taskkill", "/F", "/IM", "os-agent.exe", "/T").Run()
 		exec.Command("taskkill", "/F", "/IM", "ipatool.exe", "/T").Run()
 		exec.Command("taskkill", "/F", "/IM", "ios.exe", "/T").Run()
 	}
@@ -69,7 +71,7 @@ func main() {
 
 func openAppWindow(url string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
-		tempUserData := filepath.Join(os.Getenv("TEMP"), "openrestore_edge_profile")
+		tempUserData := filepath.Join(os.Getenv("TEMP"), "openstore_edge_profile")
 		edgePaths := []string{
 			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
 			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
@@ -97,7 +99,6 @@ func openAppWindow(url string) *exec.Cmd {
 					"--disable-background-networking",
 					"--app-auto-launched",
 				)
-				prepareCmd(cmd)
 				if err := cmd.Start(); err == nil {
 					return cmd
 				}
@@ -106,7 +107,6 @@ func openAppWindow(url string) *exec.Cmd {
 
 		// Fallback to default browser
 		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-		prepareCmd(cmd)
 		cmd.Start()
 		return nil
 	} else if runtime.GOOS == "darwin" {

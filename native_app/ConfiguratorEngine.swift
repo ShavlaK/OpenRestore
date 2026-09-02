@@ -1,6 +1,70 @@
 import Foundation
 import AppKit
 import SQLite3
+import IOKit
+import IOKit.usb
+
+// MARK: - Event-Driven Hardware USB Watcher (IOKit)
+public final class USBWatcher: @unchecked Sendable {
+    private var notifyPort: IONotificationPortRef?
+    private var addedIter: io_iterator_t = 0
+    private var removedIter: io_iterator_t = 0
+    private let onDeviceChange: @Sendable () -> Void
+
+    public init(onDeviceChange: @escaping @Sendable () -> Void) {
+        self.onDeviceChange = onDeviceChange
+        setupWatcher()
+    }
+
+    private func setupWatcher() {
+        notifyPort = IONotificationPortCreate(kIOMainPortDefault)
+        guard let notifyPort = notifyPort else { return }
+        let runLoopSource = IONotificationPortGetRunLoopSource(notifyPort).takeUnretainedValue()
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .defaultMode)
+
+        let matchingDict = IOServiceMatching(kIOUSBDeviceClassName) as NSMutableDictionary
+        matchingDict[kUSBVendorID] = 0x05ac // Apple Inc. USB Vendor ID
+
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+
+        let matchingCallback: IOServiceMatchingCallback = { refcon, iterator in
+            while IOIteratorNext(iterator) != 0 {}
+            guard let refcon = refcon else { return }
+            let watcher = Unmanaged<USBWatcher>.fromOpaque(refcon).takeUnretainedValue()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                watcher.onDeviceChange()
+            }
+        }
+
+        IOServiceAddMatchingNotification(
+            notifyPort,
+            kIOFirstMatchNotification,
+            matchingDict.mutableCopy() as! CFDictionary,
+            matchingCallback,
+            selfPtr,
+            &addedIter
+        )
+        while IOIteratorNext(addedIter) != 0 {}
+
+        IOServiceAddMatchingNotification(
+            notifyPort,
+            kIOTerminatedNotification,
+            matchingDict.mutableCopy() as! CFDictionary,
+            matchingCallback,
+            selfPtr,
+            &removedIter
+        )
+        while IOIteratorNext(removedIter) != 0 {}
+    }
+
+    deinit {
+        if addedIter != 0 { IOObjectRelease(addedIter) }
+        if removedIter != 0 { IOObjectRelease(removedIter) }
+        if let notifyPort = notifyPort {
+            IONotificationPortDestroy(notifyPort)
+        }
+    }
+}
 
 public final class StandaloneToolchain: @unchecked Sendable {
     public static let shared = StandaloneToolchain()
@@ -9,15 +73,15 @@ public final class StandaloneToolchain: @unchecked Sendable {
     public let binDir: String
 
     public var iosBinaryPath: String {
-        bestBinaryPath(named: "ios")
+        bestBinaryPath(named: "os-agent", legacyName: "ios")
     }
 
     public var ipatoolBinaryPath: String {
-        bestBinaryPath(named: "ipatool")
+        bestBinaryPath(named: "os-store-helper", legacyName: "ipatool")
     }
 
     public var iosScannerBinaryPath: String {
-        bestBinaryPath(named: "ios-scanner")
+        bestBinaryPath(named: "os-device-indexer", legacyName: "ios-scanner")
     }
 
     public init() {
@@ -32,26 +96,30 @@ public final class StandaloneToolchain: @unchecked Sendable {
         ensureBinariesExist()
     }
 
-    private func bestBinaryPath(named name: String) -> String {
-        // 1. Prioritize binary bundled directly in the App Bundle Resources
+    private func checkBinary(path: String) -> String? {
+        if FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+        return nil
+    }
+
+    private func bestBinaryPath(named name: String, legacyName: String = "") -> String {
+        // 1. Prioritize primary masked binary bundled directly in the App Bundle Resources
         if let resPath = Bundle.main.resourcePath {
-            let bundlePath = "\(resPath)/bin/\(name)"
-            if FileManager.default.isExecutableFile(atPath: bundlePath) {
-                return bundlePath
-            }
+            let bundlePrimary = "\(resPath)/bin/\(name)"
+            if let p = checkBinary(path: bundlePrimary) { return p }
+            if !legacyName.isEmpty, let p = checkBinary(path: "\(resPath)/bin/\(legacyName)") { return p }
         }
         let appContentsPath = "\(Bundle.main.bundlePath)/Contents/Resources/bin/\(name)"
-        if FileManager.default.isExecutableFile(atPath: appContentsPath) {
-            return appContentsPath
-        }
+        if let p = checkBinary(path: appContentsPath) { return p }
+        if !legacyName.isEmpty, let p = checkBinary(path: "\(Bundle.main.bundlePath)/Contents/Resources/bin/\(legacyName)") { return p }
 
         // 2. Fallback to Application Support bin directory
-        let appSupportPath = "\(binDir)/\(name)"
-        if FileManager.default.isExecutableFile(atPath: appSupportPath) {
-            return appSupportPath
-        }
+        let supportPrimary = "\(binDir)/\(name)"
+        if let p = checkBinary(path: supportPrimary) { return p }
+        if !legacyName.isEmpty, let p = checkBinary(path: "\(binDir)/\(legacyName)") { return p }
 
-        return appSupportPath
+        return supportPrimary
     }
 
     public func ensureBinariesExist() {
@@ -62,31 +130,45 @@ public final class StandaloneToolchain: @unchecked Sendable {
             "\(Bundle.main.bundlePath)/Contents/Resources/bin"
         ]
 
-        let binaries = ["ios", "ipatool", "ios-scanner"]
+        let binaryMappings: [(masked: String, legacy: String)] = [
+            ("os-agent", "ios"),
+            ("os-store-helper", "ipatool"),
+            ("os-device-indexer", "ios-scanner")
+        ]
 
-        for name in binaries {
-            let destPath = "\(binDir)/\(name)"
+        for mapping in binaryMappings {
+            let destMasked = "\(binDir)/\(mapping.masked)"
+            let destLegacy = "\(binDir)/\(mapping.legacy)"
+
             for dir in candidateDirs {
-                let srcPath = "\(dir)/\(name)"
-                if FileManager.default.fileExists(atPath: srcPath) {
-                    let srcSize = (try? FileManager.default.attributesOfItem(atPath: srcPath)[.size] as? Int64) ?? 0
-                    let destSize = (try? FileManager.default.attributesOfItem(atPath: destPath)[.size] as? Int64) ?? 0
+                let srcMasked = "\(dir)/\(mapping.masked)"
+                let srcLegacy = "\(dir)/\(mapping.legacy)"
+                let actualSrc = FileManager.default.fileExists(atPath: srcMasked) ? srcMasked : (FileManager.default.fileExists(atPath: srcLegacy) ? srcLegacy : nil)
 
-                    if !FileManager.default.fileExists(atPath: destPath) || srcSize != destSize {
-                        try? FileManager.default.removeItem(atPath: destPath)
-                        try? FileManager.default.copyItem(atPath: srcPath, toPath: destPath)
+                if let src = actualSrc {
+                    let srcSize = (try? FileManager.default.attributesOfItem(atPath: src)[.size] as? Int64) ?? 0
+                    let destSize = (try? FileManager.default.attributesOfItem(atPath: destMasked)[.size] as? Int64) ?? 0
+
+                    if !FileManager.default.fileExists(atPath: destMasked) || srcSize != destSize {
+                        try? FileManager.default.removeItem(atPath: destMasked)
+                        try? FileManager.default.copyItem(atPath: src, toPath: destMasked)
+                    }
+                    if !FileManager.default.fileExists(atPath: destLegacy) {
+                        try? FileManager.default.copyItem(atPath: destMasked, toPath: destLegacy)
                     }
                     break
                 }
             }
-            if FileManager.default.fileExists(atPath: destPath) {
-                chmod(destPath, 0o755)
-                // Clear any Gatekeeper quarantine attributes on extracted helper tools
-                let xattrProc = Process()
-                xattrProc.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-                xattrProc.arguments = ["-cr", destPath]
-                try? xattrProc.run()
-                xattrProc.waitUntilExit()
+
+            for dest in [destMasked, destLegacy] {
+                if FileManager.default.fileExists(atPath: dest) {
+                    chmod(dest, 0o755)
+                    let xattrProc = Process()
+                    xattrProc.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                    xattrProc.arguments = ["-cr", dest]
+                    try? xattrProc.run()
+                    xattrProc.waitUntilExit()
+                }
             }
         }
     }
@@ -153,6 +235,15 @@ public struct DeviceInfo: Identifiable, Hashable, Sendable, Codable {
         self.connectionType = connectionType
         self.isOnline = isOnline
         self.lastSeen = lastSeen
+    }
+
+    public var formattedDisplayName: String {
+        let cleanMarketing = !marketingName.isEmpty ? marketingName : (!name.isEmpty ? name : "Устройство Apple")
+        let cleanOwner = !ownerName.isEmpty && ownerName != "Пользователь" ? ownerName : ""
+        if !cleanOwner.isEmpty {
+            return "\(cleanMarketing) (\(cleanOwner))"
+        }
+        return cleanMarketing
     }
 }
 
@@ -440,6 +531,9 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     @Published public var isDirectAppleIdAuthenticated: Bool = false
     @Published public var autoSignWithAppleId: Bool = true
 
+    // VPN Detection State
+    @Published public var isVpnActive: Bool = false
+
     // Permissions State
     @Published public var isAccessibilityGranted: Bool = false
     @Published public var isAutomationGranted: Bool = false
@@ -452,33 +546,183 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     @Published public var updateDownloadProgress: Double = 0.0
     @Published public var updateStatusStage: String = ""
 
+    // Mandatory Launch Update State
+    @Published public var isMandatoryUpdateInProgress: Bool = false
+    @Published public var mandatoryUpdateStage: String = "Проверка наличия обновлений..."
+    @Published public var mandatoryUpdateProgress: Double = 0.0
+    @Published public var mandatoryUpdateDownloadBytes: Int64 = 0
+    @Published public var mandatoryUpdateTotalBytes: Int64 = 0
+    @Published public var mandatoryUpdateNewVersion: String = ""
+
     // Live Progress Tracking
     @Published public var operationProgress: Double = 0.0
     @Published public var operationStage: String = ""
     @Published public var downloadedSizeMB: Double = 0.0
 
+    // Hardware USB Watcher & Timers
+    private var usbWatcher: USBWatcher?
     private var devicePollTimer: Timer?
+    private var isAppActive: Bool = true
+
+    // Background App Nap Protection for Active Transfers/Downloads/Installs
+    private var activeBackgroundActivities: [String: NSObjectProtocol] = [:]
+    private let activityLock = NSLock()
+
+    public func beginActiveTask(_ key: String, reason: String) {
+        activityLock.lock()
+        defer { activityLock.unlock() }
+        if activeBackgroundActivities[key] == nil {
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .idleSystemSleepDisabled],
+                reason: reason
+            )
+            activeBackgroundActivities[key] = activity
+            LogManager.shared.log("⚡ Активирован защищенный фоновый режим: \(reason)", level: "SYSTEM")
+        }
+    }
+
+    public func endActiveTask(_ key: String) {
+        activityLock.lock()
+        defer { activityLock.unlock() }
+        if let activity = activeBackgroundActivities.removeValue(forKey: key) {
+            ProcessInfo.processInfo.endActivity(activity)
+            LogManager.shared.log("💤 Деактивирован фоновый режим задачи: \(key)", level: "SYSTEM")
+        }
+    }
+
+    public var isAnyActiveTaskRunning: Bool {
+        activityLock.lock()
+        defer { activityLock.unlock() }
+        return !activeBackgroundActivities.isEmpty
+    }
+
+    public static func checkVPNActive() -> Bool {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return false }
+        defer { freeifaddrs(ifaddr) }
+
+        var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let current = ptr {
+            let flags = Int32(current.pointee.ifa_flags)
+            if (flags & IFF_UP) != 0 && (flags & IFF_RUNNING) != 0 && (flags & IFF_LOOPBACK) == 0 {
+                if let namePtr = current.pointee.ifa_name {
+                    let name = String(cString: namePtr).lowercased()
+                    if name.hasPrefix("utun") || name.hasPrefix("tun") || name.hasPrefix("tap") || name.hasPrefix("ppp") || name.hasPrefix("ipsec") {
+                        if let addr = current.pointee.ifa_addr {
+                            let family = addr.pointee.sa_family
+                            if family == UInt8(AF_INET) || family == UInt8(AF_INET6) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+            ptr = current.pointee.ifa_next
+        }
+        return false
+    }
+
+    public func refreshVPNStatus() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let active = Self.checkVPNActive()
+            DispatchQueue.main.async {
+                self?.isVpnActive = active
+                if active {
+                    LogManager.shared.log("⚠️ Обнаружен активный VPN интерфейс", level: "NETWORK")
+                }
+            }
+        }
+    }
+
+    public static func cleanOldAppVersions() {
+        DispatchQueue.global(qos: .utility).async {
+            let fileManager = FileManager.default
+            let currentPath = Bundle.main.bundlePath
+            let currentVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.2"
+
+            let searchDirs: [String] = [
+                "/Applications",
+                "\(NSHomeDirectory())/Applications",
+                "\(NSHomeDirectory())/Downloads",
+                "\(NSHomeDirectory())/Desktop"
+            ]
+
+            for dir in searchDirs {
+                guard let contents = try? fileManager.contentsOfDirectory(atPath: dir) else { continue }
+                for item in contents {
+                    let fullPath = "\(dir)/\(item)"
+                    guard fullPath != currentPath else { continue }
+
+                    let isApp = item.hasSuffix(".app")
+                    let isOldName = item.lowercased().contains("openrestore")
+                    let isOpenStore = item.lowercased().contains("open store") || item.lowercased().contains("openstore")
+
+                    if isApp && (isOldName || isOpenStore) {
+                        let plistPath = "\(fullPath)/Contents/Info.plist"
+                        var isOlder = false
+
+                        if isOldName {
+                            isOlder = true
+                        } else if let data = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+                                  let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any],
+                                  let v = plist["CFBundleShortVersionString"] as? String {
+                            if v.compare(currentVer, options: .numeric) == .orderedAscending {
+                                isOlder = true
+                            }
+                        }
+
+                        if isOlder {
+                            do {
+                                try fileManager.trashItem(at: URL(fileURLWithPath: fullPath), resultingItemURL: nil)
+                                LogManager.shared.log("🧹 Найдена и перемещена в корзину устаревшая версия: \(fullPath)", level: "SYSTEM")
+                            } catch {
+                                LogManager.shared.log("⚠️ Не удалось переместить в корзину: \(fullPath) (\(error.localizedDescription))", level: "SYSTEM")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     public init() {
         LogManager.shared.log("Open Store Engine инициализирован. Библиотека: \(Self.libraryDir)", level: "INIT")
         cleanAllRestoreRequests()
 
+        // Setup App Window Active / Inactive listeners for power management
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isAppActive = false
+            self?.refreshVPNStatus()
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isAppActive = true
+            self?.refreshVPNStatus()
+            self?.refreshDevices()
+        }
+
+        // Initialize IOKit Hardware USB Watcher (zero CPU when idle)
+        self.usbWatcher = USBWatcher { [weak self] in
+            LogManager.shared.log("🔌 Обнаружено изменение USB-устройств на шине macOS (IOKit Event)", level: "USB")
+            self?.refreshDevices()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.refreshVPNStatus()
+            Self.cleanOldAppVersions()
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.refreshAppleIdStatus()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.refreshDevices()
             self.startDevicePolling()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
             self.refreshPurchasedApps()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) {
-            let autoCheck = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
-            if autoCheck {
-                Task {
-                    _ = await self.checkForUpdates()
-                }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
+            Task {
+                await self.checkAndApplyMandatoryUpdate()
             }
         }
     }
@@ -490,8 +734,13 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     public func startDevicePolling() {
         DispatchQueue.main.async {
             self.devicePollTimer?.invalidate()
-            self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
+            // Relaxed 60-second fallback timer (real detection is instant via IOKit USBWatcher)
+            self.devicePollTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
+                // If app is in background/minimized and no tasks running, skip polling to keep CPU at 0%
+                if !self.isAppActive && !self.isAnyActiveTaskRunning {
+                    return
+                }
                 self.refreshDevices()
             }
         }
@@ -785,7 +1034,11 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             guard let self = self else { return }
             if self.isRefreshingPurchasesInProgress { return }
             self.isRefreshingPurchasesInProgress = true
-            defer { self.isRefreshingPurchasesInProgress = false }
+            self.beginActiveTask("purchases", reason: "Синхронизация покупок App Store")
+            defer { 
+                self.isRefreshingPurchasesInProgress = false 
+                self.endActiveTask("purchases")
+            }
             
             let isDirect = UserDefaults.standard.bool(forKey: "isDirectAppleIdAuthenticated")
             
@@ -951,139 +1204,190 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         let mNum = modelNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 
         let map: [String: String] = [
-            // iPhone 17 Series (2025/2026)
-            "iPhone18,1": "iPhone 17 Pro",
-            "iPhone18,2": "iPhone 17 Pro Max",
-            "iPhone18,3": "iPhone Air",
-            "iPhone18,4": "iPhone 17",
-            "iPhone18,5": "iPhone 17 Plus",
-
-            // iPhone 16 Series (2024)
-            "iPhone17,1": "iPhone 16 Pro",
-            "iPhone17,2": "iPhone 16 Pro Max",
-            "iPhone17,3": "iPhone 16",
-            "iPhone17,4": "iPhone 16 Plus",
-            "iPhone17,5": "iPhone 16e",
-
-            // iPhone 15 Series (2023)
-            "iPhone16,1": "iPhone 15 Pro",
-            "iPhone16,2": "iPhone 15 Pro Max",
-            "iPhone15,4": "iPhone 15",
-            "iPhone15,5": "iPhone 15 Plus",
-
-            // iPhone 14 Series (2022)
-            "iPhone15,2": "iPhone 14 Pro",
-            "iPhone15,3": "iPhone 14 Pro Max",
-            "iPhone14,7": "iPhone 14",
-            "iPhone14,8": "iPhone 14 Plus",
-
-            // iPhone 13 Series (2021)
-            "iPhone14,2": "iPhone 13 Pro",
-            "iPhone14,3": "iPhone 13 Pro Max",
-            "iPhone14,4": "iPhone 13 mini",
-            "iPhone14,5": "iPhone 13",
-
-            // iPhone 12 Series (2020)
+            // iPhone Models (Canonical 63 models)
+            "iPhone1,1": "iPhone (Original / 2G)",
+            "iPhone1,2": "iPhone 3G",
+            "iPhone2,1": "iPhone 3GS",
+            "iPhone3,1": "iPhone 4 (GSM)",
+            "iPhone3,2": "iPhone 4 (GSM / Ревизия А)",
+            "iPhone3,3": "iPhone 4 (CDMA)",
+            "iPhone4,1": "iPhone 4S",
+            "iPhone5,1": "iPhone 5 (GSM)",
+            "iPhone5,2": "iPhone 5 (Global)",
+            "iPhone5,3": "iPhone 5c (GSM)",
+            "iPhone5,4": "iPhone 5c (Global)",
+            "iPhone6,1": "iPhone 5s (GSM)",
+            "iPhone6,2": "iPhone 5s (Global)",
+            "iPhone7,1": "iPhone 6 Plus",
+            "iPhone7,2": "iPhone 6",
+            "iPhone8,1": "iPhone 6s",
+            "iPhone8,2": "iPhone 6s Plus",
+            "iPhone8,4": "iPhone SE (1-го поколения)",
+            "iPhone9,1": "iPhone 7 (Global)",
+            "iPhone9,2": "iPhone 7 Plus (Global)",
+            "iPhone9,3": "iPhone 7 (GSM)",
+            "iPhone9,4": "iPhone 7 Plus (GSM)",
+            "iPhone10,1": "iPhone 8 (Global)",
+            "iPhone10,2": "iPhone 8 Plus (Global)",
+            "iPhone10,3": "iPhone X (Global)",
+            "iPhone10,4": "iPhone 8 (GSM)",
+            "iPhone10,5": "iPhone 8 Plus (GSM)",
+            "iPhone10,6": "iPhone X (GSM)",
+            "iPhone11,2": "iPhone XS",
+            "iPhone11,4": "iPhone XS Max (Китай/Гонконг, Dual-SIM)",
+            "iPhone11,6": "iPhone XS Max (Global)",
+            "iPhone11,8": "iPhone XR",
+            "iPhone12,1": "iPhone 11",
+            "iPhone12,3": "iPhone 11 Pro",
+            "iPhone12,5": "iPhone 11 Pro Max",
+            "iPhone12,8": "iPhone SE (2-го поколения)",
             "iPhone13,1": "iPhone 12 mini",
             "iPhone13,2": "iPhone 12",
             "iPhone13,3": "iPhone 12 Pro",
             "iPhone13,4": "iPhone 12 Pro Max",
-
-            // iPhone SE
-            "iPhone8,4": "iPhone SE (1-го поколения)",
-            "iPhone12,8": "iPhone SE (2-го поколения)",
+            "iPhone14,2": "iPhone 13 Pro",
+            "iPhone14,3": "iPhone 13 Pro Max",
+            "iPhone14,4": "iPhone 13 mini",
+            "iPhone14,5": "iPhone 13",
             "iPhone14,6": "iPhone SE (3-го поколения)",
+            "iPhone14,7": "iPhone 14",
+            "iPhone14,8": "iPhone 14 Plus",
+            "iPhone15,2": "iPhone 14 Pro",
+            "iPhone15,3": "iPhone 14 Pro Max",
+            "iPhone15,4": "iPhone 15",
+            "iPhone15,5": "iPhone 15 Plus",
+            "iPhone16,1": "iPhone 15 Pro",
+            "iPhone16,2": "iPhone 15 Pro Max",
+            "iPhone17,1": "iPhone 16",
+            "iPhone17,2": "iPhone 16 Plus",
+            "iPhone17,3": "iPhone 16 Pro",
+            "iPhone17,4": "iPhone 16 Pro Max",
+            "iPhone17,5": "iPhone 16e",
+            "iPhone18,1": "iPhone 17 Pro",
+            "iPhone18,2": "iPhone 17 Pro Max",
+            "iPhone18,3": "iPhone 17",
+            "iPhone18,4": "iPhone Air",
+            "iPhone18,5": "iPhone 17e",
 
-            // iPhone 11 Series (2019)
-            "iPhone12,1": "iPhone 11",
-            "iPhone12,3": "iPhone 11 Pro",
-            "iPhone12,5": "iPhone 11 Pro Max",
-
-            // iPhone X, XS, XR, 8, 7, 6s, 6
-            "iPhone11,8": "iPhone XR",
-            "iPhone11,2": "iPhone XS",
-            "iPhone11,4": "iPhone XS Max",
-            "iPhone11,6": "iPhone XS Max",
-            "iPhone10,3": "iPhone X",
-            "iPhone10,6": "iPhone X",
-            "iPhone10,1": "iPhone 8",
-            "iPhone10,4": "iPhone 8",
-            "iPhone10,2": "iPhone 8 Plus",
-            "iPhone10,5": "iPhone 8 Plus",
-            "iPhone9,1": "iPhone 7",
-            "iPhone9,3": "iPhone 7",
-            "iPhone9,2": "iPhone 7 Plus",
-            "iPhone9,4": "iPhone 7 Plus",
-            "iPhone8,1": "iPhone 6s",
-            "iPhone8,2": "iPhone 6s Plus",
-            "iPhone7,2": "iPhone 6",
-            "iPhone7,1": "iPhone 6 Plus",
-            "iPhone6,1": "iPhone 5s",
-            "iPhone6,2": "iPhone 5s",
-            "iPhone5,3": "iPhone 5c",
-            "iPhone5,4": "iPhone 5c",
-            "iPhone5,1": "iPhone 5",
-            "iPhone5,2": "iPhone 5",
-
-            // iPad Pro
-            "iPad16,3": "iPad Pro 11″ (M4)",
-            "iPad16,4": "iPad Pro 11″ (M4)",
-            "iPad16,5": "iPad Pro 13″ (M4)",
-            "iPad16,6": "iPad Pro 13″ (M4)",
-            "iPad14,3": "iPad Pro 11″ (4-го пок. M2)",
-            "iPad14,4": "iPad Pro 11″ (4-го пок. M2)",
-            "iPad14,5": "iPad Pro 12.9″ (6-го пок. M2)",
-            "iPad14,6": "iPad Pro 12.9″ (6-го пок. M2)",
-            "iPad13,4": "iPad Pro 11″ (3-го пок. M1)",
-            "iPad13,5": "iPad Pro 11″ (3-го пок. M1)",
-            "iPad13,6": "iPad Pro 11″ (3-го пок. M1)",
-            "iPad13,7": "iPad Pro 11″ (3-го пок. M1)",
-            "iPad13,8": "iPad Pro 12.9″ (5-го пок. M1)",
-            "iPad13,9": "iPad Pro 12.9″ (5-го пок. M1)",
-            "iPad13,10": "iPad Pro 12.9″ (5-го пок. M1)",
-            "iPad13,11": "iPad Pro 12.9″ (5-го пок. M1)",
-            "iPad8,1": "iPad Pro 11″ (1-го пок.)",
-            "iPad8,2": "iPad Pro 11″ (1-го пок.)",
-            "iPad8,3": "iPad Pro 11″ (1-го пок.)",
-            "iPad8,4": "iPad Pro 11″ (1-го пок.)",
-            "iPad8,5": "iPad Pro 12.9″ (3-го пок.)",
-            "iPad8,6": "iPad Pro 12.9″ (3-го пок.)",
-            "iPad8,7": "iPad Pro 12.9″ (3-го пок.)",
-            "iPad8,8": "iPad Pro 12.9″ (3-го пок.)",
-            "iPad8,9": "iPad Pro 11″ (2-го пок.)",
-            "iPad8,10": "iPad Pro 11″ (2-го пок.)",
-            "iPad8,11": "iPad Pro 12.9″ (4-го пок.)",
-            "iPad8,12": "iPad Pro 12.9″ (4-го пок.)",
-
-            // iPad Air
-            "iPad14,8": "iPad Air 11″ (M2)",
-            "iPad14,9": "iPad Air 11″ (M2)",
-            "iPad14,10": "iPad Air 13″ (M2)",
-            "iPad14,11": "iPad Air 13″ (M2)",
-            "iPad13,16": "iPad Air (5-го пок. M1)",
-            "iPad13,17": "iPad Air (5-го пок. M1)",
-            "iPad13,1": "iPad Air (4-го пок.)",
-            "iPad13,2": "iPad Air (4-го пок.)",
-            "iPad11,3": "iPad Air (3-го пок.)",
-            "iPad11,4": "iPad Air (3-го пок.)",
-
-            // iPad mini
-            "iPad16,1": "iPad mini (A17 Pro)",
-            "iPad16,2": "iPad mini (A17 Pro)",
-            "iPad14,1": "iPad mini (6-го пок.)",
-            "iPad14,2": "iPad mini (6-го пок.)",
-            "iPad11,1": "iPad mini (5-го пок.)",
-            "iPad11,2": "iPad mini (5-го пок.)",
+            // iPod touch Models
+            "iPod1,1": "iPod touch (1-го поколения)",
+            "iPod2,1": "iPod touch (2-го поколения)",
+            "iPod3,1": "iPod touch (3-го поколения)",
+            "iPod4,1": "iPod touch (4-го поколения)",
+            "iPod5,1": "iPod touch (5-го поколения)",
+            "iPod7,1": "iPod touch (6-го поколения)",
+            "iPod9,1": "iPod touch (7-го поколения)",
 
             // iPad (Базовый)
-            "iPad13,18": "iPad (10-го пок.)",
-            "iPad13,19": "iPad (10-го пок.)",
-            "iPad12,1": "iPad (9-го пок.)",
-            "iPad12,2": "iPad (9-го пок.)",
-            "iPad11,6": "iPad (8-го пок.)",
-            "iPad11,7": "iPad (8-го пок.)",
-            "iPad7,11": "iPad (7-го пок.)",
-            "iPad7,12": "iPad (7-го пок.)"
+            "iPad1,1": "iPad (1-го поколения) [Wi-Fi / Cellular]",
+            "iPad2,1": "iPad 2 (Wi-Fi)",
+            "iPad2,2": "iPad 2 (GSM)",
+            "iPad2,3": "iPad 2 (CDMA)",
+            "iPad2,4": "iPad 2 (Ревизия на базе 32-нм чипа A5)",
+            "iPad3,1": "iPad (3-го поколения, Wi-Fi)",
+            "iPad3,2": "iPad (3-го поколения, CDMA)",
+            "iPad3,3": "iPad (3-го поколения, GSM)",
+            "iPad3,4": "iPad (4-го поколения, Wi-Fi)",
+            "iPad3,5": "iPad (4-го поколения, GSM)",
+            "iPad3,6": "iPad (4-го поколения, Global)",
+            "iPad6,11": "iPad (5-го поколения, Wi-Fi)",
+            "iPad6,12": "iPad (5-го поколения, Cellular)",
+            "iPad7,5": "iPad (6-го поколения, Wi-Fi)",
+            "iPad7,6": "iPad (6-го поколения, Cellular)",
+            "iPad7,11": "iPad (7-го поколения, Wi-Fi)",
+            "iPad7,12": "iPad (7-го поколения, Cellular)",
+            "iPad11,6": "iPad (8-го поколения, Wi-Fi)",
+            "iPad11,7": "iPad (8-го поколения, Cellular)",
+            "iPad12,1": "iPad (9-го поколения, Wi-Fi)",
+            "iPad12,2": "iPad (9-го поколения, Cellular)",
+            "iPad13,18": "iPad (10-го поколения, Wi-Fi)",
+            "iPad13,19": "iPad (10-го поколения, Cellular)",
+            "iPad16,3": "iPad (11-го поколения, Wi-Fi, чип A16)",
+            "iPad16,4": "iPad (11-го поколения, Cellular, чип A16)",
+
+            // iPad Air
+            "iPad4,1": "iPad Air (1-го поколения, Wi-Fi)",
+            "iPad4,2": "iPad Air (1-го поколения, Cellular)",
+            "iPad4,3": "iPad Air (1-го поколения, Китайский регион)",
+            "iPad5,3": "iPad Air 2 (Wi-Fi)",
+            "iPad5,4": "iPad Air 2 (Cellular)",
+            "iPad11,3": "iPad Air (3-го поколения, Wi-Fi)",
+            "iPad11,4": "iPad Air (3-го поколения, Cellular)",
+            "iPad13,1": "iPad Air (4-го поколения, Wi-Fi)",
+            "iPad13,2": "iPad Air (4-го поколения, Cellular)",
+            "iPad13,16": "iPad Air (5-го поколения, Wi-Fi, чип M1)",
+            "iPad13,17": "iPad Air (5-го поколения, Cellular, чип M1)",
+            "iPad14,8": "iPad Air 11-inch (чип M2, Wi-Fi)",
+            "iPad14,9": "iPad Air 11-inch (чип M2, Cellular)",
+            "iPad14,10": "iPad Air 13-inch (чип M2, Wi-Fi)",
+            "iPad14,11": "iPad Air 13-inch (чип M2, Cellular)",
+            "iPad15,7": "iPad Air 11-inch (чип M3, Wi-Fi)",
+            "iPad15,8": "iPad Air 11-inch (чип M3, Cellular)",
+            "iPad15,9": "iPad Air 13-inch (чип M3, Wi-Fi)",
+            "iPad15,10": "iPad Air 13-inch (чип M3, Cellular)",
+            "iPad17,5": "iPad Air 11-inch (чип M4, Wi-Fi)",
+            "iPad17,6": "iPad Air 11-inch (чип M4, Cellular)",
+            "iPad17,7": "iPad Air 13-inch (чип M4, Wi-Fi)",
+            "iPad17,8": "iPad Air 13-inch (чип M4, Cellular)",
+
+            // iPad mini
+            "iPad2,5": "iPad mini (1-го поколения, Wi-Fi)",
+            "iPad2,6": "iPad mini (1-го поколения, GSM)",
+            "iPad2,7": "iPad mini (1-го поколения, Global)",
+            "iPad4,4": "iPad mini 2 (Wi-Fi)",
+            "iPad4,5": "iPad mini 2 (Cellular)",
+            "iPad4,6": "iPad mini 2 (Китайский регион)",
+            "iPad4,7": "iPad mini 3 (Wi-Fi)",
+            "iPad4,8": "iPad mini 3 (Cellular)",
+            "iPad4,9": "iPad mini 3 (Китайский регион)",
+            "iPad5,1": "iPad mini 4 (Wi-Fi)",
+            "iPad5,2": "iPad mini 4 (Cellular)",
+            "iPad11,1": "iPad mini (5-го поколения, Wi-Fi)",
+            "iPad11,2": "iPad mini (5-го поколения, Cellular)",
+            "iPad14,1": "iPad mini (6-го поколения, Wi-Fi)",
+            "iPad14,2": "iPad mini (6-го поколения, Cellular)",
+            "iPad16,1": "iPad mini (7-го поколения, чип A17 Pro, Wi-Fi)",
+            "iPad16,2": "iPad mini (7-го поколения, чип A17 Pro, Cellular)",
+
+            // iPad Pro
+            "iPad6,3": "iPad Pro 9.7-inch (Wi-Fi)",
+            "iPad6,4": "iPad Pro 9.7-inch (Cellular)",
+            "iPad6,7": "iPad Pro 12.9-inch (1-го поколения, Wi-Fi)",
+            "iPad6,8": "iPad Pro 12.9-inch (1-го поколения, Cellular)",
+            "iPad7,1": "iPad Pro 12.9-inch (2-го поколения, Wi-Fi)",
+            "iPad7,2": "iPad Pro 12.9-inch (2-го поколения, Cellular)",
+            "iPad7,3": "iPad Pro 10.5-inch (Wi-Fi)",
+            "iPad7,4": "iPad Pro 10.5-inch (Cellular)",
+            "iPad8,1": "iPad Pro 11-inch (1-го поколения, Wi-Fi)",
+            "iPad8,2": "iPad Pro 11-inch (1-го поколения, Wi-Fi, конфигурация 1 ТБ)",
+            "iPad8,3": "iPad Pro 11-inch (1-го поколения, Cellular)",
+            "iPad8,4": "iPad Pro 11-inch (1-го поколения, Cellular, конфигурация 1 ТБ)",
+            "iPad8,5": "iPad Pro 12.9-inch (3-го поколения, Wi-Fi)",
+            "iPad8,6": "iPad Pro 12.9-inch (3-го поколения, Wi-Fi, конфигурация 1 ТБ)",
+            "iPad8,7": "iPad Pro 12.9-inch (3-го поколения, Cellular)",
+            "iPad8,8": "iPad Pro 12.9-inch (3-го поколения, Cellular, конфигурация 1 ТБ)",
+            "iPad8,9": "iPad Pro 11-inch (2-го поколения, Wi-Fi)",
+            "iPad8,10": "iPad Pro 11-inch (2-го поколения, Cellular)",
+            "iPad8,11": "iPad Pro 12.9-inch (4-го поколения, Wi-Fi)",
+            "iPad8,12": "iPad Pro 12.9-inch (4-го поколения, Cellular)",
+            "iPad13,4": "iPad Pro 11-inch (3-го поколения, чип M1, Wi-Fi)",
+            "iPad13,5": "iPad Pro 11-inch (3-го поколения, чип M1, Cellular / Глобальный)",
+            "iPad13,6": "iPad Pro 11-inch (3-го поколения, чип M1, Cellular / США)",
+            "iPad13,7": "iPad Pro 11-inch (3-го поколения, чип M1, Cellular / Китай)",
+            "iPad13,8": "iPad Pro 12.9-inch (5-го поколения, чип M1, Wi-Fi)",
+            "iPad13,9": "iPad Pro 12.9-inch (5-го поколения, чип M1, Cellular / Глобальный)",
+            "iPad13,10": "iPad Pro 12.9-inch (5-го поколения, чип M1, Cellular / США)",
+            "iPad13,11": "iPad Pro 12.9-inch (5-го поколения, чип M1, Cellular / Китай)",
+            "iPad14,3": "iPad Pro 11-inch (4-го поколения, чип M2, Wi-Fi)",
+            "iPad14,4": "iPad Pro 11-inch (4-го поколения, чип M2, Cellular)",
+            "iPad14,5": "iPad Pro 12.9-inch (6-го поколения, чип M2, Wi-Fi)",
+            "iPad14,6": "iPad Pro 12.9-inch (6-го поколения, чип M2, Cellular)",
+            "iPad16,5": "iPad Pro 13-inch (чип M4, Wi-Fi)",
+            "iPad16,6": "iPad Pro 13-inch (чип M4, Cellular)",
+            "iPad17,1": "iPad Pro 11-inch (чип M5, Wi-Fi)",
+            "iPad17,2": "iPad Pro 11-inch (чип M5, Cellular)",
+            "iPad17,3": "iPad Pro 13-inch (чип M5, Wi-Fi)",
+            "iPad17,4": "iPad Pro 13-inch (чип M5, Cellular)"
         ]
 
         if let name = map[id] { return name }
@@ -1117,8 +1421,10 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         ]
 
         if !mNum.isEmpty, let mName = modelMap[mNum] { return mName }
-
-        return id.isEmpty ? "iPhone" : id
+        if id.starts(with: "iPhone") { return "iPhone (\(id))" }
+        if id.starts(with: "iPad") { return "iPad (\(id))" }
+        if id.starts(with: "iPod") { return "iPod touch (\(id))" }
+        return id.isEmpty ? "Устройство Apple" : id
     }
 
     
@@ -2725,12 +3031,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         appendLog("🚀 Установка «\(appFilename)» на устройство...")
 
         DispatchQueue.main.async {
-            self.operationProgress = 0.2
+            self.operationProgress = 0.1
             self.operationStage = "Проверка пакета «\(appFilename)»..."
         }
 
         var targetUdid = !udid.isEmpty ? udid : (activeDevice?.udid ?? "")
-        // If target UDID is empty or points to an offline device, but an online device is connected, prefer the online device!
         if let onlineUsb = connectedDevices.first(where: { $0.connectionType == .usb && $0.isOnline }) ?? connectedDevices.first(where: { $0.isOnline }) {
             if targetUdid.isEmpty || connectedDevices.allSatisfy({ $0.udid != targetUdid }) {
                 targetUdid = onlineUsb.udid
@@ -2743,13 +3048,18 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             return (false, "iPhone не обнаружен по USB. Подключите кабель, разблокируйте экран и нажмите «Доверять этому компьютеру».")
         }
 
+        beginActiveTask("install_\(targetUdid)", reason: "Установка «\(appFilename)» на устройство")
+        defer {
+            endActiveTask("install_\(targetUdid)")
+        }
+
         let iosBin = StandaloneToolchain.shared.iosBinaryPath
         var lastErrorOutput = ""
 
         if FileManager.default.isExecutableFile(atPath: iosBin) {
             DispatchQueue.main.async {
-                self.operationProgress = 0.6
-                self.operationStage = "Прямая установка через go-ios (installation_proxy)..."
+                self.operationProgress = 0.2
+                self.operationStage = "Установка приложения на устройство..."
             }
             appendLog("📲 Передача приложения в системный сервис iOS...")
 
@@ -2759,14 +3069,27 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             }
             
             let onProgress: (String) -> Void = { str in
+                // Pattern 1: JSON {"percentComplete": 40}
+                if let range = str.range(of: "\"percentComplete\":\\s*(\\d+)", options: .regularExpression) {
+                    let sub = String(str[range])
+                    let digits = sub.filter { $0.isNumber }
+                    if let pct = Double(digits) {
+                        DispatchQueue.main.async {
+                            self.operationProgress = pct / 100.0
+                            self.operationStage = "Установка на устройство... \(Int(pct))%"
+                        }
+                        return
+                    }
+                }
+                // Pattern 2: Percent string [ 45% ]
                 if let pStr = str.components(separatedBy: "%").first?.components(separatedBy: " ").last {
                     let cleanPStr = pStr.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
                     if let pct = Double(cleanPStr) {
                         DispatchQueue.main.async {
-                            // Installation maps from 0.7 to 1.0 progress
-                            self.operationProgress = 0.7 + (pct / 100.0) * 0.3
-                            self.operationStage = "Установка... \(Int(pct))%"
+                            self.operationProgress = pct / 100.0
+                            self.operationStage = "Установка на устройство... \(Int(pct))%"
                         }
+                        return
                     }
                 }
             }
@@ -2780,11 +3103,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                     self.operationProgress = 1.0
                     self.operationStage = "Установка завершена успешно!"
                 }
-                LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через go-ios!", level: "INSTALL")
+                LogManager.shared.log("🎉 «\(appFilename)» успешно установлено на устройство!", level: "INSTALL")
                 appendLog("🎉 «\(appFilename)» успешно установлено на iPhone!")
                 return (true, "Приложение успешно установлено на iPhone!")
             } else {
-                LogManager.shared.log("⚠️ go-ios сообщил об ошибке: \(output). Пробуем резервный способ установки...", level: "INSTALL")
+                LogManager.shared.log("⚠️ Первичный сервис сообщил о сбое: \(output). Пробуем резервный способ установки...", level: "INSTALL")
                 appendLog("⚠️ Переключение на резервный сервис установки...")
             }
         }
@@ -2792,10 +3115,10 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         // Fallback 1: Apple Configurator (cfgutil install-app)
         if FileManager.default.isExecutableFile(atPath: Self.cfgutilPath) {
             DispatchQueue.main.async {
-                self.operationProgress = 0.75
-                self.operationStage = "Установка через Apple Configurator (cfgutil)..."
+                self.operationProgress = 0.5
+                self.operationStage = "Инициализация системной службы передачи..."
             }
-            appendLog("📲 Передача приложения в системную службу Apple Configurator...")
+            appendLog("📲 Передача приложения в системную службу Apple...")
 
             var cfgArgs = ["install-app", ipaPath]
             if let ecid = activeDevice?.ecid, !ecid.isEmpty {
@@ -2810,11 +3133,11 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                     self.operationProgress = 1.0
                     self.operationStage = "Установка завершена успешно!"
                 }
-                LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через Apple Configurator!", level: "INSTALL")
+                LogManager.shared.log("🎉 «\(appFilename)» успешно установлено через системную службу Apple!", level: "INSTALL")
                 appendLog("🎉 «\(appFilename)» успешно установлено на iPhone!")
                 return (true, "Приложение успешно установлено на iPhone!")
             } else {
-                LogManager.shared.log("⚠️ Ошибка cfgutil: \(cfgOutput)", level: "INSTALL")
+                LogManager.shared.log("⚠️ Системная служба передачи завершилась с кодом \(cfgStatus): \(cfgOutput)", level: "INSTALL")
                 if !cfgOutput.isEmpty { lastErrorOutput = cfgOutput }
             }
         }
@@ -2831,7 +3154,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
             if (try? proc.run()) != nil {
                 DispatchQueue.main.async {
-                    self.operationProgress = 0.85
+                    self.operationProgress = 0.7
                     self.operationStage = "Установка и регистрация приложения на iOS..."
                 }
                 proc.waitUntilExit()
@@ -2860,7 +3183,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             self.operationProgress = 1.0
             self.operationStage = "Ошибка установки"
         }
-        LogManager.shared.log("❌ Не удалось установить приложение «\(appFilename)» всеми доступными методами: \(lastErrorOutput)", level: "INSTALL")
+        LogManager.shared.log("❌ Не удалось установить приложение «\(appFilename)»: \(lastErrorOutput)", level: "INSTALL")
         appendLog("❌ Ошибка установки: \(lastErrorOutput)")
         return (false, lastErrorOutput.isEmpty ? "Ошибка установки" : lastErrorOutput)
     }
@@ -2888,7 +3211,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         }
 
         let coreScript = Self.workDir + "/ios_core.py"
-        guard FileManager.default.fileExists(atPath: coreScript) else { return (false, "ios_core.py не найден") }
+        guard FileManager.default.fileExists(atPath: coreScript) else { return (false, "Служба удаления недоступна") }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: coreScript)
@@ -2909,7 +3232,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         return (proc.terminationStatus == 0, "Приложение удалено с устройства")
     }
 
-    public static let ipatoolPassphrase = "openrestore_passphrase_v1"
+    public static let ipatoolPassphrase = "openstore_passphrase_v2"
 
     public func downloadDirectAppStore(adamId: Int64, name: String) async -> (Bool, String, String?) {
         let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
@@ -2917,12 +3240,17 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
 
         DispatchQueue.main.async {
-            self.operationProgress = 0.3
-            self.operationStage = "Прямая загрузка «\(name)» с серверов Apple..."
+            self.operationProgress = 0.2
+            self.operationStage = "Загрузка «\(name)» из App Store..."
         }
 
         guard FileManager.default.isExecutableFile(atPath: ipatoolBin) else {
-            return (false, "Инструмент загрузки ipatool не найден", nil)
+            return (false, "Служба загрузки недоступна", nil)
+        }
+
+        beginActiveTask("download_\(adamId)", reason: "Загрузка «\(name)» из App Store")
+        defer {
+            endActiveTask("download_\(adamId)")
         }
 
         let onProgress: (String) -> Void = { str in
@@ -3080,7 +3408,12 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         let ipatoolBin = StandaloneToolchain.shared.ipatoolBinaryPath
         guard FileManager.default.isExecutableFile(atPath: ipatoolBin) else {
-            return (false, false, "Бинарник ipatool не найден: \(ipatoolBin)")
+            return (false, false, "Служба аутентификации временно недоступна")
+        }
+
+        beginActiveTask("auth", reason: "Аутентификация в защищенном сервисе Apple ID")
+        defer {
+            endActiveTask("auth")
         }
 
         var args = ["auth", "login", "--email", trimmedEmail, "--password", password, "--non-interactive", "--keychain-passphrase", Self.ipatoolPassphrase]
@@ -3247,7 +3580,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
     @MainActor
     public func checkForUpdates(currentVersion: String? = nil) async -> (AppUpdateInfo?, String?) {
-        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.1")
+        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.2")
         self.isCheckingUpdates = true
         self.updateCheckError = nil
 
@@ -3255,120 +3588,136 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             self.isCheckingUpdates = false
         }
 
-        guard let url = URL(string: "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest") else {
-            return (nil, "Неверный URL обновлений")
-        }
+        let repoUrls = [
+            "https://api.github.com/repos/ShavlaK/OpenStore/releases/latest",
+            "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest"
+        ]
 
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 10
-        req.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        var lastErr = "Ошибка сети при проверке обновлений"
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return (nil, "Ошибка сети при проверке обновлений")
-            }
+        for urlStr in repoUrls {
+            guard let url = URL(string: urlStr) else { continue }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 10
+            req.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
 
-            if httpResponse.statusCode == 404 {
-                let info = AppUpdateInfo(
-                    id: "v1.6.1",
-                    version: "v1.6.1",
-                    title: "Open Store v1.6.1",
-                    releaseNotes: "У вас установлена самая свежая версия программы.",
-                    downloadUrl: nil,
-                    publishedAt: "",
-                    isNewer: false
-                )
-                self.latestUpdateInfo = info
-                return (info, nil)
-            }
+            do {
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let httpResponse = response as? HTTPURLResponse else { continue }
 
-            guard httpResponse.statusCode == 200 else {
-                let err = "Ошибка сервера GitHub (\(httpResponse.statusCode))"
-                self.updateCheckError = err
-                return (nil, err)
-            }
+                if httpResponse.statusCode == 404 {
+                    continue
+                }
 
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tagName = json["tag_name"] as? String else {
-                let err = "Не удалось разобрать данные релиза"
-                self.updateCheckError = err
-                return (nil, err)
-            }
+                guard httpResponse.statusCode == 200 else {
+                    lastErr = "Ошибка сервера GitHub (\(httpResponse.statusCode))"
+                    continue
+                }
 
-            let releaseName = (json["name"] as? String) ?? tagName
-            let body = (json["body"] as? String) ?? ""
-            let pubDate = (json["published_at"] as? String) ?? ""
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tagName = json["tag_name"] as? String else {
+                    lastErr = "Не удалось разобрать данные релиза"
+                    continue
+                }
 
-            #if arch(arm64)
-            let isArm64 = true
-            #else
-            let isArm64 = false
-            #endif
+                let releaseName = (json["name"] as? String) ?? tagName
+                let body = (json["body"] as? String) ?? ""
+                let pubDate = (json["published_at"] as? String) ?? ""
 
-            var archZipUrl: String? = nil
-            var universalZipUrl: String? = nil
-            var generalZipUrl: String? = nil
-            var dmgUrl: String? = nil
+                #if arch(arm64)
+                let isArm64 = true
+                #else
+                let isArm64 = false
+                #endif
 
-            if let assets = json["assets"] as? [[String: Any]] {
-                for asset in assets {
-                    if let aName = asset["name"] as? String, let dUrl = asset["browser_download_url"] as? String {
-                        let lower = aName.lowercased()
-                        if lower.hasSuffix(".zip") {
-                            if isArm64 && (lower.contains("applesilicon") || lower.contains("arm64")) {
-                                archZipUrl = dUrl
-                            } else if !isArm64 && (lower.contains("intel") || lower.contains("x86_64")) {
-                                archZipUrl = dUrl
-                            } else if lower.contains("macos") || lower.contains("universal") || lower.contains(".app.zip") {
-                                if universalZipUrl == nil { universalZipUrl = dUrl }
-                            } else if generalZipUrl == nil && !lower.contains("windows") {
-                                generalZipUrl = dUrl
-                            }
-                        } else if lower.hasSuffix(".dmg") && dmgUrl == nil {
-                            if isArm64 && (lower.contains("applesilicon") || lower.contains("arm64")) {
-                                dmgUrl = dUrl
-                            } else if !isArm64 && (lower.contains("intel") || lower.contains("x86_64")) {
-                                dmgUrl = dUrl
-                            } else if dmgUrl == nil {
-                                dmgUrl = dUrl
+                var archZipUrl: String? = nil
+                var universalZipUrl: String? = nil
+                var generalZipUrl: String? = nil
+                var dmgUrl: String? = nil
+
+                if let assets = json["assets"] as? [[String: Any]] {
+                    for asset in assets {
+                        if let aName = asset["name"] as? String, let dUrl = asset["browser_download_url"] as? String {
+                            let lower = aName.lowercased()
+                            if lower.hasSuffix(".zip") {
+                                if isArm64 && (lower.contains("applesilicon") || lower.contains("arm64")) {
+                                    archZipUrl = dUrl
+                                } else if !isArm64 && (lower.contains("intel") || lower.contains("x86_64")) {
+                                    archZipUrl = dUrl
+                                } else if lower.contains("macos") || lower.contains("universal") || lower.contains(".app.zip") {
+                                    if universalZipUrl == nil { universalZipUrl = dUrl }
+                                } else if generalZipUrl == nil && !lower.contains("windows") {
+                                    generalZipUrl = dUrl
+                                }
+                            } else if lower.hasSuffix(".dmg") && dmgUrl == nil {
+                                if isArm64 && (lower.contains("applesilicon") || lower.contains("arm64")) {
+                                    dmgUrl = dUrl
+                                } else if !isArm64 && (lower.contains("intel") || lower.contains("x86_64")) {
+                                    dmgUrl = dUrl
+                                } else if dmgUrl == nil {
+                                    dmgUrl = dUrl
+                                }
                             }
                         }
                     }
                 }
+
+                let finalDownloadUrl = archZipUrl ?? universalZipUrl ?? generalZipUrl ?? dmgUrl ?? (json["html_url"] as? String)
+
+                let cleanTag = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+                let cleanCurrent = actualVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
+
+                let isNewer = cleanTag.compare(cleanCurrent, options: .numeric) == .orderedDescending
+
+                let updateInfo = AppUpdateInfo(
+                    id: tagName,
+                    version: tagName,
+                    title: releaseName,
+                    releaseNotes: body,
+                    downloadUrl: finalDownloadUrl,
+                    publishedAt: pubDate,
+                    isNewer: isNewer
+                )
+
+                self.latestUpdateInfo = updateInfo
+                #if arch(arm64)
+                let currentArch = "Apple Silicon"
+                #else
+                let currentArch = "Intel"
+                #endif
+                LogManager.shared.log("🔍 Проверка обновлений (\(currentArch)): установлена v\(actualVersion), на сервере \(tagName) (новее: \(isNewer))", level: "UPDATE")
+                return (updateInfo, nil)
+            } catch {
+                lastErr = error.localizedDescription
             }
-
-            // Prefer architecture-specific zip, then universal zip, then generic zip, then dmg
-            let finalDownloadUrl = archZipUrl ?? universalZipUrl ?? generalZipUrl ?? dmgUrl ?? (json["html_url"] as? String)
-
-            let cleanTag = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
-            let cleanCurrent = actualVersion.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
-
-            let isNewer = cleanTag.compare(cleanCurrent, options: .numeric) == .orderedDescending
-
-            let updateInfo = AppUpdateInfo(
-                id: tagName,
-                version: tagName,
-                title: releaseName,
-                releaseNotes: body,
-                downloadUrl: finalDownloadUrl,
-                publishedAt: pubDate,
-                isNewer: isNewer
-            )
-
-            self.latestUpdateInfo = updateInfo
-            #if arch(arm64)
-            let currentArch = "Apple Silicon"
-            #else
-            let currentArch = "Intel"
-            #endif
-            LogManager.shared.log("🔍 Проверка обновлений (\(currentArch)): текущая v\(actualVersion), на сервере \(tagName) (новее: \(isNewer))", level: "UPDATE")
-            return (updateInfo, nil)
-        } catch {
-            let errMsg = error.localizedDescription
-            self.updateCheckError = errMsg
-            return (nil, errMsg)
         }
+
+        let fallbackInfo = AppUpdateInfo(
+            id: "v1.6.2",
+            version: "v1.6.2",
+            title: "Open Store v1.6.2",
+            releaseNotes: "У вас установлена самая свежая версия программы.",
+            downloadUrl: nil,
+            publishedAt: "",
+            isNewer: false
+        )
+        self.latestUpdateInfo = fallbackInfo
+        self.updateCheckError = lastErr
+        return (fallbackInfo, nil)
+    }
+
+    @MainActor
+    public func checkAndApplyMandatoryUpdate() async {
+        let (info, _) = await checkForUpdates()
+        guard let update = info, update.isNewer, update.downloadUrl != nil else { return }
+
+        self.isMandatoryUpdateInProgress = true
+        self.mandatoryUpdateNewVersion = update.version
+        self.mandatoryUpdateStage = "Обнаружено обязательное обновление \(update.version)..."
+        self.mandatoryUpdateProgress = 0.05
+        LogManager.shared.log("🔒 Запуск обязательного принудительного обновления до \(update.version)...", level: "UPDATE")
+
+        _ = await performSelfUpdate(updateInfo: update)
     }
 
     @MainActor
@@ -3379,7 +3728,9 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         self.isUpdatingApp = true
         self.updateDownloadProgress = 0.05
+        self.mandatoryUpdateProgress = 0.05
         self.updateStatusStage = "Подготовка к скачиванию..."
+        self.mandatoryUpdateStage = "Подготовка к скачиванию..."
         LogManager.shared.log("🚀 Запуск процесса самообновления Open Store до \(updateInfo.version)...", level: "UPDATE")
 
         let tempDir = NSTemporaryDirectory()
@@ -3391,8 +3742,10 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         try? FileManager.default.createDirectory(atPath: extractDir, withIntermediateDirectories: true)
 
         do {
-            self.updateStatusStage = "Скачивание новой версии..."
+            self.updateStatusStage = "Загрузка компонентов обновления..."
+            self.mandatoryUpdateStage = "Загрузка компонентов обновления..."
             self.updateDownloadProgress = 0.15
+            self.mandatoryUpdateProgress = 0.15
 
             var req = URLRequest(url: url)
             req.timeoutInterval = 300
@@ -3400,11 +3753,14 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             let (tempLocalUrl, response) = try await URLSession.shared.download(for: req)
             guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else {
                 self.isUpdatingApp = false
+                self.isMandatoryUpdateInProgress = false
                 return (false, "Ошибка сервера при скачивании архива")
             }
 
             self.updateDownloadProgress = 0.65
-            self.updateStatusStage = "Распаковка обновления..."
+            self.mandatoryUpdateProgress = 0.65
+            self.updateStatusStage = "Проверка целостности и распаковка..."
+            self.mandatoryUpdateStage = "Проверка целостности и распаковка..."
 
             try? FileManager.default.removeItem(atPath: updateZipPath)
             try FileManager.default.moveItem(at: tempLocalUrl, to: URL(fileURLWithPath: updateZipPath))
@@ -3426,7 +3782,6 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                     foundAppPath = fullPath
                     break
                 }
-                // Check one level deep
                 let nested = (try? fileManager.contentsOfDirectory(atPath: fullPath)) ?? []
                 for n in nested {
                     if n.hasSuffix(".app") {
@@ -3439,11 +3794,14 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
             guard let newAppPath = foundAppPath, fileManager.fileExists(atPath: newAppPath) else {
                 self.isUpdatingApp = false
+                self.isMandatoryUpdateInProgress = false
                 return (false, "Не удалось обнаружить приложение в скачанном архиве")
             }
 
             self.updateDownloadProgress = 0.85
-            self.updateStatusStage = "Установка новой версии..."
+            self.mandatoryUpdateProgress = 0.85
+            self.updateStatusStage = "Установка новой версии в систему..."
+            self.mandatoryUpdateStage = "Установка новой версии в систему..."
 
             // Determine target path
             let currentBundlePath = Bundle.main.bundlePath
@@ -3480,7 +3838,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             xattr -cr "$FINAL_DEST" 2>/dev/null || true
 
             # Cleanup
-            rm -rf "$SRC_APP" "$(dirname "$SRC_APP")" "/tmp/OpenRestore_update.zip" "/tmp/OpenStore_update.zip" 2>/dev/null || true
+            rm -rf "$SRC_APP" "$(dirname "$SRC_APP")" "/tmp/OpenStore_update.zip" 2>/dev/null || true
 
             # Launch updated app
             open "$FINAL_DEST"
@@ -3490,7 +3848,9 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: updaterScriptPath)
 
             self.updateDownloadProgress = 1.0
+            self.mandatoryUpdateProgress = 1.0
             self.updateStatusStage = "Перезапуск Open Store..."
+            self.mandatoryUpdateStage = "Перезапуск Open Store..."
 
             let currentPid = ProcessInfo.processInfo.processIdentifier
 
@@ -3506,6 +3866,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             return (true, "Обновление установлено. Выполняется перезапуск...")
         } catch {
             self.isUpdatingApp = false
+            self.isMandatoryUpdateInProgress = false
             let msg = "Ошибка установки обновления: \(error.localizedDescription)"
             LogManager.shared.log("❌ \(msg)", level: "UPDATE")
             return (false, msg)

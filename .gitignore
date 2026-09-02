@@ -17,6 +17,7 @@ scratch/
 build_tmp/
 tmp_arch/
 OpenRestore_Release/
+dist/
 bmrng_new_inspect/
 
 # Logs & temp files
@@ -43,3 +44,29 @@ Open Store.app/
 
 # Agent local skills
 .agent/
+
+# Internal dev & reverse engineering protection
+*.py
+OpenRestore_Windows/src/
+tools/
+fix_*.py
+fix_*.sh
+scratch_*.py
+test_*.py
+test_*.swift
+openrestore.py
+ios_core.py
+configurator_db.py
+device_manager.py
+asset_watcher.py
+ui_automation.py
+web_server.py
+run.sh
+OpenRestore.command
+requirements.txt
+OpenRestore_Windows/requirements.txt
+OpenRestore_Windows/bin/os-agent.exe
+OpenRestore_Windows/bin/os-store-helper.exe
+OpenRestore_Windows/OpenStore.exe
+OpenRestore_Windows/OpenRestore.exe
+

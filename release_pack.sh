@@ -4,7 +4,7 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-VERSION="1.6.1"
+VERSION="1.6.2"
 DIST_DIR="$DIR/dist"
 RELEASE_DIR="$DIR/OpenRestore_Release"
 
@@ -66,16 +66,20 @@ echo "💿 Создание релизов для Intel (x86_64)..."
 create_dmg "x86_64" "OpenStore-v${VERSION}-Mac-Intel.dmg"
 create_zip "x86_64" "OpenStore-v${VERSION}-Mac-Intel.zip"
 
-# 5. Create Universal / Legacy Fallback ZIPs (for 100% 1.6.0 auto-update compatibility)
+# 5. Create Universal / Legacy Fallback ZIPs (for 100% backwards compatibility)
 echo "📦 Создание Universal ZIP-архивов для обратной совместимости..."
 create_zip "universal" "OpenStore-v${VERSION}-macOS.zip"
 cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenRestore.app.zip"
 cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenRestore-v${VERSION}-macOS.zip"
 
-# 6. Create Windows ZIP
-echo "📦 Создание Windows ZIP-архива..."
+# 6. Create Windows ZIP (with windowsgui flag & masked tools)
+echo "📦 Сборка и создание Windows ZIP-архива..."
 (
     cd OpenRestore_Windows
+    cp bin/ios.exe bin/os-agent.exe 2>/dev/null || true
+    cp bin/ipatool.exe bin/os-store-helper.exe 2>/dev/null || true
+    GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui -s -w" -o OpenStore.exe .
+    cp OpenStore.exe OpenRestore.exe
     zip -r -q "../dist/OpenStore-v${VERSION}-Windows-x64.zip" OpenStore.exe OpenRestore.exe bin/ web/
     cp "../dist/OpenStore-v${VERSION}-Windows-x64.zip" "../dist/OpenRestore-v${VERSION}-Windows-x64.zip"
 )

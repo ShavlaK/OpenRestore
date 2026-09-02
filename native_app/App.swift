@@ -4,6 +4,8 @@ import AppKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setCustomAppIcon()
+        ConfiguratorEngine.cleanOldAppVersions()
+        ConfiguratorEngine.shared.refreshVPNStatus()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -11,9 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        print("Cleaning up background processes...")
-        
-        let toolsToKill = ["ipatool", "ios", "ios-scanner", "Apple Configurator"]
+        let toolsToKill = ["os-store-helper", "os-agent", "os-device-indexer", "ipatool", "ios", "ios-scanner", "Apple Configurator"]
         for tool in toolsToKill {
             let task = Process()
             task.launchPath = "/usr/bin/killall"

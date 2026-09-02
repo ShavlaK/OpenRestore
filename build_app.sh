@@ -4,9 +4,9 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-echo "Компиляция нативного приложения Open Store.app (v1.6.1)..."
+echo "Компиляция нативного приложения Open Store.app (v1.6.2)..."
 
-VERSION="1.6.1"
+VERSION="1.6.2"
 
 # Create build functions
 build_app_for_arch() {
@@ -52,33 +52,40 @@ build_app_for_arch() {
 </plist>
 PLIST
 
-    # Compile Swift
+    # Compile Swift with IOKit framework and symbol stripping (-Xlinker -x)
     swiftc -O -parse-as-library -target "$target_arch" \
       native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
-      -lsqlite3 -o "$app_dir/Contents/MacOS/OpenStore"
+      -framework IOKit -framework Foundation -framework AppKit -framework SwiftUI \
+      -lsqlite3 -Xlinker -x -o "$app_dir/Contents/MacOS/OpenStore"
 
     cp catalog.json "$app_dir/Contents/Resources/catalog.json"
     if [ -f "AppIcon.icns" ]; then
       cp AppIcon.icns "$app_dir/Contents/Resources/AppIcon.icns"
     fi
 
-    # Extract single-architecture binaries from Universal ones
+    # Extract single-architecture binaries from Universal ones & mask names
     if [ -f "bin/ios" ]; then
-      lipo bin/ios -extract "$arch" -output "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || cp bin/ios "$app_dir/Contents/Resources/bin/ios"
-      chmod +x "$app_dir/Contents/Resources/bin/ios"
-      codesign --force --identifier com.openstore.ios -s - "$app_dir/Contents/Resources/bin/ios"
+      lipo bin/ios -extract "$arch" -output "$app_dir/Contents/Resources/bin/os-agent" 2>/dev/null || cp bin/ios "$app_dir/Contents/Resources/bin/os-agent"
+      cp "$app_dir/Contents/Resources/bin/os-agent" "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
+      chmod +x "$app_dir/Contents/Resources/bin/os-agent" "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
+      codesign --force --identifier com.openstore.agent -s - "$app_dir/Contents/Resources/bin/os-agent" 2>/dev/null || true
+      codesign --force --identifier com.openstore.ios -s - "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
     fi
 
     if [ -f "bin/ipatool" ]; then
-      lipo bin/ipatool -extract "$arch" -output "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || cp bin/ipatool "$app_dir/Contents/Resources/bin/ipatool"
-      chmod +x "$app_dir/Contents/Resources/bin/ipatool"
-      codesign --force --identifier com.openstore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool"
+      lipo bin/ipatool -extract "$arch" -output "$app_dir/Contents/Resources/bin/os-store-helper" 2>/dev/null || cp bin/ipatool "$app_dir/Contents/Resources/bin/os-store-helper"
+      cp "$app_dir/Contents/Resources/bin/os-store-helper" "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
+      chmod +x "$app_dir/Contents/Resources/bin/os-store-helper" "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
+      codesign --force --identifier com.openstore.helper -s - "$app_dir/Contents/Resources/bin/os-store-helper" 2>/dev/null || true
+      codesign --force --identifier com.openstore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
     fi
 
     if [ -f "bin/ios-scanner" ]; then
-      lipo bin/ios-scanner -extract "$arch" -output "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || cp bin/ios-scanner "$app_dir/Contents/Resources/bin/ios-scanner"
-      chmod +x "$app_dir/Contents/Resources/bin/ios-scanner"
-      codesign --force --identifier com.openstore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner"
+      lipo bin/ios-scanner -extract "$arch" -output "$app_dir/Contents/Resources/bin/os-device-indexer" 2>/dev/null || cp bin/ios-scanner "$app_dir/Contents/Resources/bin/os-device-indexer"
+      cp "$app_dir/Contents/Resources/bin/os-device-indexer" "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
+      chmod +x "$app_dir/Contents/Resources/bin/os-device-indexer" "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
+      codesign --force --identifier com.openstore.indexer -s - "$app_dir/Contents/Resources/bin/os-device-indexer" 2>/dev/null || true
+      codesign --force --identifier com.openstore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
     fi
 
     xattr -cr "$app_dir"
@@ -98,13 +105,19 @@ build_universal_app() {
 
     lipo -create "build_tmp/OpenStore_arm64.app/Contents/MacOS/OpenStore" "build_tmp/OpenStore_x86_64.app/Contents/MacOS/OpenStore" -output "$app_dir/Contents/MacOS/OpenStore"
     
+    cp bin/ios "$app_dir/Contents/Resources/bin/os-agent" 2>/dev/null || true
     cp bin/ios "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
+    cp bin/ipatool "$app_dir/Contents/Resources/bin/os-store-helper" 2>/dev/null || true
     cp bin/ipatool "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
+    cp bin/ios-scanner "$app_dir/Contents/Resources/bin/os-device-indexer" 2>/dev/null || true
     cp bin/ios-scanner "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
     
     chmod +x "$app_dir/Contents/Resources/bin/"* 2>/dev/null || true
+    codesign --force --identifier com.openstore.agent -s - "$app_dir/Contents/Resources/bin/os-agent" 2>/dev/null || true
     codesign --force --identifier com.openstore.ios -s - "$app_dir/Contents/Resources/bin/ios" 2>/dev/null || true
+    codesign --force --identifier com.openstore.helper -s - "$app_dir/Contents/Resources/bin/os-store-helper" 2>/dev/null || true
     codesign --force --identifier com.openstore.ipatool -s - "$app_dir/Contents/Resources/bin/ipatool" 2>/dev/null || true
+    codesign --force --identifier com.openstore.indexer -s - "$app_dir/Contents/Resources/bin/os-device-indexer" 2>/dev/null || true
     codesign --force --identifier com.openstore.ios-scanner -s - "$app_dir/Contents/Resources/bin/ios-scanner" 2>/dev/null || true
 
     xattr -cr "$app_dir"
