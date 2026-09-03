@@ -192,6 +192,8 @@ struct ContentView: View {
         SidebarItem(rawValue: storedSidebarTab) ?? .device
     }
 
+    @Environment(\.colorScheme) private var colorScheme
+
     // Batch download state
     @State private var selectedAdamIds: Set<Int64> = []
     @State private var isBatchDownloading: Bool = false
@@ -375,26 +377,25 @@ struct ContentView: View {
     private var sidebarNavigationView: some View {
         VStack(spacing: 0) {
             // App Title & Badge
-            HStack(spacing: 10) {
-                AppLogoView(size: 30, cornerRadius: 8)
+            HStack(spacing: Theme.Metrics.padding8) {
+                AppLogoView(size: 30, cornerRadius: Theme.Metrics.radiusIcon)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Open Store")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
                     Text("iOS App Manager")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .themeAux()
                 }
 
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Metrics.padding16)
             .padding(.top, 32)
-            .padding(.bottom, 12)
+            .padding(.bottom, Theme.Metrics.padding12)
 
             // Account & Device Glass Cards
-            VStack(spacing: 8) {
+            VStack(spacing: Theme.Metrics.padding8) {
                 // Apple ID Button Card
                 Button(action: {
                     if currentEngineMode == .configurator {
@@ -403,19 +404,19 @@ struct ContentView: View {
                         showAppleIdSheet = true
                     }
                 }) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Theme.Metrics.padding8) {
                         ZStack {
                             Circle()
-                                .fill((currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) || (currentEngineMode == .direct && engine.isAppleIdAuthenticated) ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12))
+                                .fill((currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) || (currentEngineMode == .direct && engine.isAppleIdAuthenticated) ? Theme.Colors.blue.opacity(0.15) : Color.secondary.opacity(0.12))
                                 .frame(width: 28, height: 28)
                             Image(systemName: engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? "person.crop.circle.fill" : "person.crop.circle")
                                 .font(.system(size: 16))
-                                .foregroundColor(engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? .blue : .secondary)
+                                .foregroundColor(engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? Theme.Colors.blue : .secondary)
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
                             Text(currentEngineMode == .configurator ? "Apple Configurator Auth" : (engine.activeAppleIdEmail.isEmpty ? "Apple ID — Войти" : engine.activeAppleIdEmail))
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(Theme.Typography.aux.weight(.semibold))
                                 .foregroundColor(.primary)
                                 .lineLimit(1)
                             Text(currentEngineMode == .configurator ? (!engine.currentAccountDsid.isEmpty ? "\(engine.purchasedApps.count) покупок • Configurator" : "Нажмите, чтобы открыть") : (engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."))" : (engine.isAppleIdAuthenticated && engine.purchasedApps.isEmpty ? "Загрузка покупок..." : (engine.currentAccountDsid.isEmpty && !engine.isAppleIdAuthenticated ? "Нажмите для настроек" : "\(engine.purchasedApps.count) покупок • FairPlay"))))
@@ -429,13 +430,9 @@ struct ContentView: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.secondary)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-                    )
+                    .padding(.horizontal, Theme.Metrics.padding12)
+                    .padding(.vertical, Theme.Metrics.padding8)
+                    .themeCardBackground(scheme: colorScheme)
                 }
                 .buttonStyle(.plain)
 
@@ -445,20 +442,20 @@ struct ContentView: View {
                     selectedDeviceForDetail = activeDev
                     showDeviceManagerSheet = true
                 }) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Theme.Metrics.padding8) {
                         ZStack {
                             Circle()
-                                .fill(activeDev != nil ? (activeDev?.connectionType == .usb ? Color.green.opacity(0.15) : (activeDev?.connectionType == .wifi ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12))) : Color.secondary.opacity(0.12))
+                                .fill(activeDev != nil ? (activeDev?.connectionType == .usb ? Theme.Colors.green.opacity(0.15) : (activeDev?.connectionType == .wifi ? Theme.Colors.blue.opacity(0.15) : Color.secondary.opacity(0.12))) : Color.secondary.opacity(0.12))
                                 .frame(width: 28, height: 28)
                             Image(systemName: activeDev?.connectionType.icon ?? "cable.connector")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(activeDev != nil ? (activeDev?.connectionType == .usb ? .green : (activeDev?.connectionType == .wifi ? .blue : .secondary)) : .secondary)
+                                .foregroundColor(activeDev != nil ? (activeDev?.connectionType == .usb ? Theme.Colors.green : (activeDev?.connectionType == .wifi ? Theme.Colors.blue : .secondary)) : .secondary)
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
                             if let dev = activeDev {
                                 Text(dev.formattedDisplayName)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(Theme.Typography.aux.weight(.semibold))
                                     .foregroundColor(.primary)
                                     .lineLimit(1)
                                 Text("\(dev.modelIdentifier) • \(dev.iosVersion)")
@@ -467,7 +464,7 @@ struct ContentView: View {
                                     .lineLimit(1)
                             } else {
                                 Text("iPhone не подключен")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(Theme.Typography.aux.weight(.semibold))
                                     .foregroundColor(.primary)
                                 Text("Подключите кабель или Wi-Fi")
                                     .font(.system(size: 9))
@@ -482,8 +479,8 @@ struct ContentView: View {
                                 .font(.system(size: 8, weight: .bold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(dev.isOnline ? (dev.connectionType == .usb ? Color.green.opacity(0.15) : Color.blue.opacity(0.15)) : Color.secondary.opacity(0.15))
-                                .foregroundColor(dev.isOnline ? (dev.connectionType == .usb ? .green : .blue) : .secondary)
+                                .background(dev.isOnline ? (dev.connectionType == .usb ? Theme.Colors.green.opacity(0.15) : Theme.Colors.blue.opacity(0.15)) : Color.secondary.opacity(0.15))
+                                .foregroundColor(dev.isOnline ? (dev.connectionType == .usb ? Theme.Colors.green : Theme.Colors.blue) : .secondary)
                                 .clipShape(Capsule())
                         } else {
                             Circle()
@@ -491,13 +488,9 @@ struct ContentView: View {
                                 .frame(width: 6, height: 6)
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
+                    .padding(.horizontal, Theme.Metrics.padding12)
+                    .padding(.vertical, Theme.Metrics.padding8)
+                    .themeCardBackground(scheme: colorScheme)
                 }
                 .buttonStyle(.plain)
                 .help("Нажмите для открытия Менеджера устройств")
@@ -514,13 +507,12 @@ struct ContentView: View {
 
             // Scrollable Navigation List
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Theme.Metrics.padding16) {
                     // Sources Section
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("ИСТОЧНИКИ")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary.opacity(0.8))
-                            .padding(.horizontal, 18)
+                    VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                        Text("Источники")
+                            .themeSectionHeader()
+                            .padding(.horizontal, Theme.Metrics.padding16)
                             .padding(.bottom, 2)
 
                         sidebarNavButton(item: .device)
@@ -528,11 +520,10 @@ struct ContentView: View {
                     }
 
                     // Tools Section
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("ИНСТРУМЕНТЫ")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary.opacity(0.8))
-                            .padding(.horizontal, 18)
+                    VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                        Text("Инструменты")
+                            .themeSectionHeader()
+                            .padding(.horizontal, Theme.Metrics.padding16)
                             .padding(.bottom, 2)
 
                         sidebarNavButton(item: .customId)
@@ -540,17 +531,16 @@ struct ContentView: View {
                     }
 
                     // System Section
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("СИСТЕМА")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary.opacity(0.8))
-                            .padding(.horizontal, 18)
+                    VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                        Text("Система")
+                            .themeSectionHeader()
+                            .padding(.horizontal, Theme.Metrics.padding16)
                             .padding(.bottom, 2)
 
                         sidebarNavButton(item: .settings)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, Theme.Metrics.padding8)
             }
 
             Spacer()
@@ -559,17 +549,17 @@ struct ContentView: View {
             Rectangle()
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, Theme.Metrics.padding12)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                HStack(spacing: Theme.Metrics.padding8) {
                     Image(systemName: currentEngineMode == .direct ? "bolt.fill" : "gearshape.2.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(currentEngineMode == .direct ? .blue : .orange)
-                        .frame(width: 16)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(currentEngineMode == .direct ? Theme.Colors.blue : Theme.Colors.amber)
+                        .frame(width: 18)
 
-                    Text(currentEngineMode == .direct ? "Прямой нативный (Open Store Core)" : "Резервная служба Apple")
-                        .font(.system(size: 10, weight: .semibold))
+                    Text(currentEngineMode == .direct ? "Прямой нативный" : "Apple Configurator")
+                        .font(Theme.Typography.aux.weight(.semibold))
                         .foregroundColor(.primary)
 
                     Spacer()
@@ -587,12 +577,11 @@ struct ContentView: View {
                 }
 
                 Text(currentEngineMode == .direct ? "Быстрая установка без Configurator" : "Резервный режим через GUI")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
+                    .themeAux()
                     .lineLimit(1)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Theme.Metrics.padding16)
+            .padding(.vertical, Theme.Metrics.padding12)
         }
     }
 
@@ -860,7 +849,7 @@ struct ContentView: View {
         let isSelected = app.adamId != nil && selectedAdamIds.contains(app.adamId!)
         let savedIPA = isSavedInLibrary(adamId: app.adamId ?? 0, name: app.name, bundleId: app.bundleId)
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: Theme.Metrics.padding12) {
             // Checkbox
             if let aid = app.adamId, aid > 0 {
                 Button(action: {
@@ -869,7 +858,7 @@ struct ContentView: View {
                 }) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 15))
-                        .foregroundColor(isSelected ? .blue : Color.secondary.opacity(0.5))
+                        .foregroundColor(isSelected ? Theme.Colors.blue : Color.secondary.opacity(0.5))
                 }
                 .buttonStyle(.plain)
             } else {
@@ -882,12 +871,11 @@ struct ContentView: View {
             appIconView(url: app.artworkUrl, name: app.name)
 
             // Details
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                HStack(spacing: Theme.Metrics.padding8) {
                     Text(app.displayName.isEmpty ? app.name : app.displayName)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.primary)
-                                .lineLimit(3)
+                        .themeCardTitle()
+                        .lineLimit(2)
 
                     if !app.bundleVersion.isEmpty {
                         Text(app.bundleVersion)
@@ -900,17 +888,17 @@ struct ContentView: View {
                     }
                 }
 
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Metrics.padding4) {
                     Text(app.bundleId)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
+                        .themeSubtitle()
+                        .font(.system(size: 11, design: .monospaced)) // Override size/design for bundleId
                         .lineLimit(1)
 
                     if let aid = app.adamId, aid > 0 {
                         Text("•").foregroundColor(.secondary)
                         Text("ID: \(String(aid))")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.blue)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Theme.Colors.blue)
                     }
 
                     if savedIPA != nil {
@@ -921,10 +909,10 @@ struct ContentView: View {
                             Text("В библиотеке")
                                 .font(.system(size: 9, weight: .bold))
                         }
-                        .foregroundColor(.green)
+                        .foregroundColor(Theme.Colors.green)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.green.opacity(0.12))
+                        .background(Theme.Colors.green.opacity(0.12))
                         .clipShape(Capsule())
                     }
                 }
@@ -1089,31 +1077,46 @@ struct ContentView: View {
     private func purchasedAppRow(item: PurchasedApp) -> some View {
         let savedIPA = isSavedInLibrary(adamId: item.adamId, name: item.name, bundleId: item.bundleId)
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: Theme.Metrics.padding12) {
             appIconView(url: item.artworkUrl, name: item.name)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
                 Text(item.name)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.primary)
-                .lineLimit(3)
+                    .themeCardTitle()
+                    .lineLimit(2)
 
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Metrics.padding4) {
                     Text(item.bundleId)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
+                        .themeSubtitle()
+                        .font(.system(size: 11, design: .monospaced)) // Override size/design for bundleId
+                        .lineLimit(1)
 
                     Text("•").foregroundColor(.secondary)
 
                     Text("ID: \(String(item.adamId))")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.blue)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Theme.Colors.blue)
 
                     if let d = item.purchaseDate {
                         Text("•").foregroundColor(.secondary)
                         Text(dateFormatted(d))
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .themeSubtitle()
+                            .font(.system(size: 11))
+                    }
+
+                    if savedIPA != nil {
+                        Text("•").foregroundColor(.secondary)
+                        HStack(spacing: 2) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 8))
+                            Text("В библиотеке")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(Theme.Colors.green)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Theme.Colors.green.opacity(0.12))
+                        .clipShape(Capsule())
                     }
                 }
             }
@@ -1379,26 +1382,25 @@ struct ContentView: View {
     private func savedIPARow(item: SavedIPA) -> some View {
         let isSelected = selectedSavedIPAPaths.contains(item.path)
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: Theme.Metrics.padding12) {
             Button(action: {
                 if isSelected { selectedSavedIPAPaths.remove(item.path) }
                 else { selectedSavedIPAPaths.insert(item.path) }
             }) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 15))
-                    .foregroundColor(isSelected ? .blue : Color.secondary.opacity(0.5))
+                    .foregroundColor(isSelected ? Theme.Colors.blue : Color.secondary.opacity(0.5))
             }
             .buttonStyle(.plain)
 
             // App Icon
             appIconView(url: item.artworkUrl, name: item.displayName)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                HStack(spacing: Theme.Metrics.padding8) {
                     Text(item.displayName)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.primary)
-                        .lineLimit(3)
+                        .themeCardTitle()
+                        .lineLimit(2)
 
                     if !item.version.isEmpty {
                         Text(item.version)
@@ -1411,22 +1413,22 @@ struct ContentView: View {
                     }
                 }
 
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Metrics.padding4) {
                     Text(item.filename)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .themeSubtitle()
+                        .font(.system(size: 11)) // override size if needed, but standard subtitle is 12px
                         .lineLimit(1)
 
                     Text("•").foregroundColor(.secondary)
 
                     Text(item.size)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
 
                     Text("•").foregroundColor(.secondary)
 
                     Text(item.date)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .themeSubtitle()
+                        .font(.system(size: 11))
                 }
             }
 
@@ -1576,42 +1578,40 @@ struct ContentView: View {
                                 preferDirectMode = true
                             }
                         }) {
-                            HStack(alignment: .top, spacing: 12) {
+                            HStack(alignment: .top, spacing: Theme.Metrics.padding12) {
                                 Image(systemName: currentEngineMode == .direct ? "largecircle.fill.circle" : "circle")
                                     .font(.system(size: 16))
-                                    .foregroundColor(currentEngineMode == .direct ? .blue : .secondary)
+                                    .foregroundColor(currentEngineMode == .direct ? Theme.Colors.blue : .secondary)
                                     .padding(.top, 2)
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
+                                VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                                    HStack(spacing: Theme.Metrics.padding4) {
                                         Text("⚡ Прямой нативный режим (Open Store Core)")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundColor(.primary)
+                                            .themeCardTitle()
 
                                         Text("По умолчанию")
                                             .font(.system(size: 9, weight: .bold))
                                             .foregroundColor(.white)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .background(Capsule().fill(Color.blue))
+                                            .background(Capsule().fill(Theme.Colors.blue))
                                     }
 
                                     Text("Молниеносная установка за 2–3 секунды в фоновом режиме через системный сервис iOS. Не требует запуска сторонних утилит, AppleScript и разрешений системы.")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
+                                        .themeSubtitle()
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
 
                                 Spacer()
                             }
-                            .padding(12)
+                            .padding(Theme.Metrics.padding12)
                             .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(currentEngineMode == .direct ? Color.blue.opacity(0.08) : Color.primary.opacity(0.03))
+                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
+                                    .fill(currentEngineMode == .direct ? Theme.Colors.blue.opacity(0.08) : Color.primary.opacity(0.03))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(currentEngineMode == .direct ? Color.blue.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1.5)
+                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
+                                    .stroke(currentEngineMode == .direct ? Theme.Colors.blue.opacity(0.4) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
                             )
                         }
                         .buttonStyle(.plain)
@@ -1623,42 +1623,40 @@ struct ContentView: View {
                                 preferDirectMode = false
                             }
                         }) {
-                            HStack(alignment: .top, spacing: 12) {
+                            HStack(alignment: .top, spacing: Theme.Metrics.padding12) {
                                 Image(systemName: currentEngineMode == .configurator ? "largecircle.fill.circle" : "circle")
                                     .font(.system(size: 16))
-                                    .foregroundColor(currentEngineMode == .configurator ? .orange : .secondary)
+                                    .foregroundColor(currentEngineMode == .configurator ? Theme.Colors.amber : .secondary)
                                     .padding(.top, 2)
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
+                                VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                                    HStack(spacing: Theme.Metrics.padding4) {
                                         Text("⚙️ Apple Configurator (Резервный режим)")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundColor(.primary)
+                                            .themeCardTitle()
 
                                         Text("Резерв")
                                             .font(.system(size: 9, weight: .bold))
                                             .foregroundColor(.white)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .background(Capsule().fill(Color.orange))
+                                            .background(Capsule().fill(Theme.Colors.amber))
                                     }
 
                                     Text("Классический режим через графический интерфейс Apple Configurator и базу данных CoreData. Включается только при необходимости.")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
+                                        .themeSubtitle()
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
 
                                 Spacer()
                             }
-                            .padding(12)
+                            .padding(Theme.Metrics.padding12)
                             .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(currentEngineMode == .configurator ? Color.orange.opacity(0.08) : Color.primary.opacity(0.03))
+                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
+                                    .fill(currentEngineMode == .configurator ? Theme.Colors.amber.opacity(0.08) : Color.primary.opacity(0.03))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(currentEngineMode == .configurator ? Color.orange.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1.5)
+                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
+                                    .stroke(currentEngineMode == .configurator ? Theme.Colors.amber.opacity(0.4) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
                             )
                         }
                         .buttonStyle(.plain)
@@ -1935,25 +1933,20 @@ struct ContentView: View {
     }
 
     private func settingsCard<Content: View>(title: String, icon: String, iconColor: Color, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.padding12) {
+            HStack(spacing: Theme.Metrics.padding8) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(iconColor)
                 Text(title)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.primary)
+                    .font(Theme.Typography.cardTitle)
             }
 
             content()
         }
-        .padding(16)
+        .padding(Theme.Metrics.padding16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .themeCardBackground(scheme: colorScheme)
     }
 
     // MARK: - Apple ID Sheet
@@ -2277,7 +2270,7 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
         )
         .onAppear {
             if appleIdEmailInput.isEmpty && !engine.activeAppleIdEmail.isEmpty && !engine.activeAppleIdEmail.contains("DSID") && !engine.isDirectAppleIdAuthenticated {
@@ -2312,19 +2305,19 @@ struct ContentView: View {
                 fallbackIcon(name: name)
             }
         }
-        .frame(width: 36, height: 36)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(width: Theme.Metrics.iconSizeLarge, height: Theme.Metrics.iconSizeLarge)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.radiusIcon, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Theme.Metrics.radiusIcon, style: .continuous)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
         )
     }
 
     private func fallbackIcon(name: String) -> some View {
         ZStack {
-            LinearGradient(colors: [Color.blue.opacity(0.8), Color.indigo.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [Theme.Colors.blue.opacity(0.8), Color.indigo.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing)
             Text(String(name.prefix(1)).uppercased())
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
         }
     }
@@ -2444,6 +2437,11 @@ struct ContentView: View {
             .padding(20)
         }
         .frame(width: 540)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+        )
     }
 
     // MARK: - Device Manager Sheet (iMazing Style)
@@ -2751,6 +2749,11 @@ struct ContentView: View {
             }
         }
         .frame(width: 820, height: 570)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+        )
     }
 
     private func deviceListCard(dev: DeviceInfo, isOnline: Bool) -> some View {
@@ -2914,6 +2917,11 @@ struct ContentView: View {
             .padding(20)
         }
         .frame(width: 420)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+        )
     }
 
     // MARK: - Business Logic

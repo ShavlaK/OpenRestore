@@ -56,7 +56,7 @@ PLIST
 
     # Compile Swift with IOKit framework and symbol stripping (-Xlinker -x)
     swiftc -O -parse-as-library -target "$target_arch" \
-      native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift \
+      native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift native_app/Theme.swift \
       -framework IOKit -framework Foundation -framework AppKit -framework SwiftUI \
       -lsqlite3 -Xlinker -x -o "$app_dir/Contents/MacOS/OpenStore"
 
