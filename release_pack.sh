@@ -1,12 +1,12 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 VERSION="1.6.2"
 DIST_DIR="$DIR/dist"
-RELEASE_DIR="$DIR/OpenRestore_Release"
+RELEASE_DIR="$DIR/OpenStore_Release"
 
 echo "=========================================="
 echo "  Open Store v${VERSION} — Сборка Раздельных Релизов"
@@ -69,24 +69,24 @@ create_zip "x86_64" "OpenStore-v${VERSION}-Mac-Intel.zip"
 # 5. Create Universal / Legacy Fallback ZIPs (for 100% backwards compatibility)
 echo "📦 Создание Universal ZIP-архивов для обратной совместимости..."
 create_zip "universal" "OpenStore-v${VERSION}-macOS.zip"
-cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenRestore.app.zip"
-cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenRestore-v${VERSION}-macOS.zip"
+cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenStore.app.zip"
+cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip"
 
 # 6. Create Windows ZIP (with windowsgui flag & masked tools)
 echo "📦 Сборка и создание Windows ZIP-архива..."
 (
-    cd OpenRestore_Windows
+    cd OpenStore_Windows
     cp bin/ios.exe bin/os-agent.exe 2>/dev/null || true
     cp bin/ipatool.exe bin/os-store-helper.exe 2>/dev/null || true
     GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui -s -w" -o OpenStore.exe .
-    cp OpenStore.exe OpenRestore.exe
-    zip -r -q "../dist/OpenStore-v${VERSION}-Windows-x64.zip" OpenStore.exe OpenRestore.exe bin/ web/
-    cp "../dist/OpenStore-v${VERSION}-Windows-x64.zip" "../dist/OpenRestore-v${VERSION}-Windows-x64.zip"
+    cp OpenStore.exe OpenStore.exe
+    zip -r -q "../dist/OpenStore-v${VERSION}-Windows-x64.zip" OpenStore.exe OpenStore.exe bin/ web/
+    cp "../dist/OpenStore-v${VERSION}-Windows-x64.zip" "../dist/OpenStore-v${VERSION}-Windows-x64.zip"
 )
 
 # 7. Setup Local Release Directory
 mkdir -p "$RELEASE_DIR"
-rm -rf "$RELEASE_DIR/Open Store.app" "$RELEASE_DIR/OpenRestore.app"
+rm -rf "$RELEASE_DIR/Open Store.app" "$RELEASE_DIR/OpenStore.app"
 cp -R "build_tmp/OpenStore_arm64.app" "$RELEASE_DIR/Open Store.app"
 
 # 8. Generate Checksums

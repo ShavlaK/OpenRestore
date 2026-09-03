@@ -52,6 +52,45 @@ extension View {
     }
 }
 
+// MARK: - Modern Monotone Matte Modifiers (Clean, Flat, Semi-transparent macOS Style)
+struct MatteButtonStyle: ButtonStyle {
+    var isProminent: Bool = false
+    var tintColor: Color = .blue
+    var cornerRadius: CGFloat = 8
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: isProminent ? .semibold : .medium))
+            .foregroundColor(isProminent ? .white : .primary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        isProminent
+                            ? tintColor.opacity(configuration.isPressed ? 0.80 : 0.95)
+                            : Color.white.opacity(configuration.isPressed ? 0.12 : 0.07)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        isProminent ? Color.clear : Color.white.opacity(0.10),
+                        lineWidth: 1
+                    )
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func matteButton(isProminent: Bool = false, tint: Color = .blue, cornerRadius: CGFloat = 8) -> some View {
+        self.buttonStyle(MatteButtonStyle(isProminent: isProminent, tintColor: tint, cornerRadius: cornerRadius))
+    }
+}
+
 // MARK: - Engine Mode Enum
 public enum InstallEngineMode: String, CaseIterable, Identifiable {
     case direct = "direct"
@@ -176,7 +215,7 @@ struct ContentView: View {
     @State private var appleIdAuthError: String = ""
     @State private var appleIdAuthSuccess: String = ""
     @State private var isPasswordVisible: Bool = false
-    @State private var vpnNoticeDismissed: Bool = false
+    @AppStorage("vpnNoticeDismissed") private var vpnNoticeDismissed: Bool = false
 
     @State private var selectedSavedIPAPaths: Set<String> = []
     @State private var savedIPASearchQuery: String = ""
@@ -271,7 +310,8 @@ struct ContentView: View {
                     detailContentView
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.windowBackgroundColor).opacity(0.65))
+                .background(Color(NSColor.windowBackgroundColor).opacity(0.5).background(.ultraThinMaterial))
+                .ignoresSafeArea(.container, edges: .top)
             }
 
             if engine.isMandatoryUpdateInProgress {
@@ -350,7 +390,7 @@ struct ContentView: View {
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .padding(.top, 32)
             .padding(.bottom, 12)
 
             // Account & Device Glass Cards
@@ -564,6 +604,8 @@ struct ContentView: View {
         return Button(action: {
             withAnimation(.easeInOut(duration: 0.15)) {
                 storedSidebarTab = item.rawValue
+                searchQuery = ""
+                savedIPASearchQuery = ""
             }
         }) {
             HStack(spacing: 10) {
@@ -629,6 +671,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             if engine.isVpnActive && !vpnNoticeDismissed {
                 vpnTopNoticeBanner
+                    .zIndex(200)
             }
 
             switch selectedSidebar {
@@ -641,142 +684,175 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Glass Toolbar Helper
-    private func glassToolbar<T: View>(@ViewBuilder _ content: () -> T) -> some View {
+    // MARK: - Matte Translucent Header Container
+    @ViewBuilder
+    private func frostedGlassHeader<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
+            .frame(maxWidth: .infinity)
+            .background(
+                ZStack {
+                    // 1. Native macOS blur
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+
+                    // 2. Monotone translucent matte tint
+                    Color(NSColor.windowBackgroundColor).opacity(0.85)
+                }
+            )
             .overlay(
+                // 3. Clean hairline separator
                 Rectangle()
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(Color(NSColor.separatorColor).opacity(0.3))
                     .frame(height: 1),
                 alignment: .bottom
             )
+            .zIndex(100)
+    }
+
+    // MARK: - Header Panel Helper
+    private func detailHeaderBar<L: View>(@ViewBuilder leftContent: () -> L, searchQuery: Binding<String>, placeholder: String) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            leftContent()
+
+            Spacer(minLength: 16)
+
+            // Clean Matte Search Panel
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 12, weight: .medium))
+
+                TextField(placeholder, text: searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .frame(minWidth: 160, maxWidth: 260)
+
+                if !searchQuery.wrappedValue.isEmpty {
+                    Button(action: { searchQuery.wrappedValue = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, (engine.isVpnActive && !vpnNoticeDismissed) ? 8 : 14)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 0. Old Device Apps View
-    private var oldDeviceAppsView: some View {
-        VStack(spacing: 0) {
-            glassToolbar {
-                HStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                        TextField("Поиск среди \(engine.oldDeviceApps.count) приложений на iPhone...", text: $searchQuery)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                        if !searchQuery.isEmpty {
-                            Button(action: { searchQuery = "" }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 12))
+    private var oldDeviceHeader: some View {
+        frostedGlassHeader {
+            VStack(spacing: 0) {
+                detailHeaderBar(
+                    leftContent: {
+                        Button(action: {
+                            engine.scanInstalledAppsFromDevice(catalog: catalogApps)
+                        }) {
+                            HStack(spacing: 5) {
+                                if engine.isScanningApps {
+                                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                Text("Обновить")
                             }
-                            .buttonStyle(.plain)
                         }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
-
-                    Button(action: {
-                        engine.scanInstalledAppsFromDevice(catalog: catalogApps)
-                    }) {
-                        HStack(spacing: 4) {
-                            if engine.isScanningApps {
-                                ProgressView().scaleEffect(0.6)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            Text("Обновить")
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-                    .disabled(engine.isScanningApps)
-                }
-            }
-
-            // Batch selection bar
-            let appsWithId = engine.oldDeviceApps.filter { $0.adamId != nil && $0.adamId! > 0 }
-            if !appsWithId.isEmpty {
-                HStack(spacing: 10) {
-                    Button(selectedAdamIds.count == appsWithId.count ? "Снять выбор" : "Выбрать все (\(appsWithId.count))") {
-                        if selectedAdamIds.count == appsWithId.count {
-                            selectedAdamIds.removeAll()
-                        } else {
-                            selectedAdamIds = Set(appsWithId.compactMap { $0.adamId })
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-
-                    if !selectedAdamIds.isEmpty {
-                        Text("Выбрано: \(selectedAdamIds.count)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.blue)
-
-                        Button(action: { startBatchDownload(installToDevice: false) }) {
-                            Label("Скачать (\(selectedAdamIds.count))", systemImage: "arrow.down.circle")
-                        }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
-                        .controlSize(.small)
-                        .disabled(isBatchDownloading)
-
-                        Button(action: { startBatchDownload(installToDevice: true) }) {
-                            Label("Установить (\(selectedAdamIds.count))", systemImage: "arrow.down.to.line.circle.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .roundedCapsuleButton()
-                        .tint(.blue)
-                        .controlSize(.small)
-                        .disabled(isBatchDownloading)
-                    }
-
-                    Spacer()
-
-                    if isBatchDownloading {
-                        HStack(spacing: 6) {
-                            ProgressView().scaleEffect(0.6)
-                            Text("Загрузка: \(batchDone)/\(batchTotal)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.orange)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(Color.blue.opacity(0.06))
-                .overlay(
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.05))
-                        .frame(height: 1),
-                    alignment: .bottom
+                        .matteButton(isProminent: false, cornerRadius: 8)
+                        .disabled(engine.isScanningApps)
+                    },
+                    searchQuery: $searchQuery,
+                    placeholder: "Поиск среди \(engine.oldDeviceApps.count) приложений..."
                 )
-            }
 
+                // Batch selection bar integrated into matte header
+                let appsWithId = engine.oldDeviceApps.filter { $0.adamId != nil && $0.adamId! > 0 }
+                if !appsWithId.isEmpty {
+                    Divider().opacity(0.12)
+                    HStack(spacing: 10) {
+                        Button(selectedAdamIds.count == appsWithId.count ? "Снять выбор" : "Выбрать все (\(appsWithId.count))") {
+                            if selectedAdamIds.count == appsWithId.count {
+                                selectedAdamIds.removeAll()
+                            } else {
+                                selectedAdamIds = Set(appsWithId.compactMap { $0.adamId })
+                            }
+                        }
+                        .matteButton(isProminent: false, cornerRadius: 8)
+
+                        if !selectedAdamIds.isEmpty {
+                            Text("Выбрано: \(selectedAdamIds.count)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.blue)
+
+                            Button(action: { startBatchDownload(installToDevice: false) }) {
+                                Label("Скачать (\(selectedAdamIds.count))", systemImage: "arrow.down.circle")
+                            }
+                            .matteButton(isProminent: false, cornerRadius: 8)
+                            .disabled(isBatchDownloading)
+
+                            Button(action: { startBatchDownload(installToDevice: true) }) {
+                                Label("Установить (\(selectedAdamIds.count))", systemImage: "arrow.down.to.line.circle.fill")
+                            }
+                            .matteButton(isProminent: true, tint: .blue, cornerRadius: 8)
+                            .disabled(isBatchDownloading)
+                        }
+
+                        Spacer()
+
+                        if isBatchDownloading {
+                            HStack(spacing: 6) {
+                                ProgressView().scaleEffect(0.6)
+                                Text("Загрузка: \(batchDone)/\(batchTotal)")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
+                }
+            }
+        }
+    }
+
+    private var oldDeviceAppsView: some View {
+        Group {
             if engine.oldDeviceApps.isEmpty {
                 emptyStateView(
                     icon: "iphone.gen3.slash",
                     title: "Приложения не найдены",
                     subtitle: "Подключите iPhone по кабелю и нажмите «Обновить», чтобы считать установленные программы."
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(filteredOldDeviceApps) { app in
-                    deviceAppRow(app: app)
-                        .listRowSeparator(.visible)
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(filteredOldDeviceApps) { app in
+                            deviceAppRow(app: app)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
-                .listStyle(.plain)
+                .clipped()
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            oldDeviceHeader
         }
     }
 
@@ -942,71 +1018,71 @@ struct ContentView: View {
             }
             .frame(width: 250, alignment: .trailing)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isSelected ? Color.blue.opacity(0.08) : Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
+        )
     }
 
     // MARK: - 2. Purchased Apps View
-    private var purchasedAppsView: some View {
-        VStack(spacing: 0) {
-            glassToolbar {
-                HStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                        TextField("Поиск среди \(engine.totalPurchasedAppsCount > 0 ? engine.totalPurchasedAppsCount : engine.purchasedApps.count) покупок в Apple ID...", text: $searchQuery)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                        if !searchQuery.isEmpty {
-                            Button(action: { searchQuery = "" }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 12))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
-
+    private var purchasedAppsHeader: some View {
+        frostedGlassHeader {
+            detailHeaderBar(
+                leftContent: {
                     Button(action: {
                         engine.refreshPurchasedApps()
                         engine.refreshAppleIdStatus()
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             if engine.isLoadingPurchasedApps {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .scaleEffect(0.7)
+                                ProgressView().controlSize(.small).scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .semibold))
                             }
-                            Label(engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."))" : "Синхронизировать", systemImage: "arrow.clockwise")
+                            let countStr = engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."
+                            Text(engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(countStr))" : "Синхронизировать")
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
+                    .matteButton(isProminent: false, cornerRadius: 8)
                     .disabled(engine.isLoadingPurchasedApps)
-                }
-            }
+                },
+                searchQuery: $searchQuery,
+                placeholder: "Поиск среди \(engine.totalPurchasedAppsCount > 0 ? engine.totalPurchasedAppsCount : engine.purchasedApps.count) покупок..."
+            )
+        }
+    }
 
+    private var purchasedAppsView: some View {
+        Group {
             if engine.purchasedApps.isEmpty {
                 emptyStateView(
                     icon: "bag",
                     title: engine.isLoadingPurchasedApps ? "Синхронизация покупок..." : "Покупки не найдены",
                     subtitle: engine.isLoadingPurchasedApps ? "Загружаем полный список ваших приложений из Apple ID..." : "Нажмите на Apple ID в боковой панели, чтобы войти в аккаунт и синхронизировать приложения."
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(filteredPurchasedApps) { item in
-                    purchasedAppRow(item: item)
-                        .listRowSeparator(.visible)
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(filteredPurchasedApps) { item in
+                            purchasedAppRow(item: item)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
-                .listStyle(.plain)
+                .clipped()
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            purchasedAppsHeader
         }
     }
 
@@ -1098,7 +1174,16 @@ struct ContentView: View {
             }
             .frame(width: 224, alignment: .trailing)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        )
     }
 
     // MARK: - 3. Custom ID View
@@ -1111,7 +1196,7 @@ struct ContentView: View {
 
                 VStack(spacing: 4) {
                     Text("Восстановление по Adam ID")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                     Text("Введите числовой идентификатор любого приложения из App Store для прямой загрузки официального IPA.")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
@@ -1127,23 +1212,26 @@ struct ContentView: View {
 
                         TextField("Например: 570510529", text: $customAdamId)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(.system(size: 13, design: .monospaced))
                             .onSubmit {
                                 if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
                                     startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
                                 }
                             }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.8), in: Capsule())
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(0.06))
+                    )
                     .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
                     )
                     .frame(width: 320)
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Button(action: {
                             if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
                                 startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
@@ -1151,9 +1239,7 @@ struct ContentView: View {
                         }) {
                             Label("Скачать IPA", systemImage: "arrow.down.circle")
                         }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
-                        .controlSize(.regular)
+                        .matteButton(isProminent: false, cornerRadius: 8)
                         .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
 
                         Button(action: {
@@ -1163,21 +1249,20 @@ struct ContentView: View {
                         }) {
                             Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .roundedCapsuleButton()
-                        .tint(.blue)
-                        .controlSize(.regular)
+                        .matteButton(isProminent: true, tint: .blue, cornerRadius: 8)
                         .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
                     }
                 }
             }
-            .padding(32)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            .padding(28)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
             )
-            .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 3)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
 
             Spacer()
         }
@@ -1186,128 +1271,108 @@ struct ContentView: View {
     }
 
     // MARK: - 4. Saved IPA Library View
-    private var savedIPAsView: some View {
-        VStack(spacing: 0) {
-            glassToolbar {
-                HStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                        TextField("Поиск среди \(savedIPAs.count) сохраненных IPA на Mac...", text: $savedIPASearchQuery)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                        if !savedIPASearchQuery.isEmpty {
-                            Button(action: { savedIPASearchQuery = "" }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 12))
+    private var savedIPAsHeader: some View {
+        frostedGlassHeader {
+            VStack(spacing: 0) {
+                detailHeaderBar(
+                    leftContent: {
+                        HStack(spacing: 8) {
+                            Button(action: { importIpaFile() }) {
+                                Label("Импорт IPA", systemImage: "plus.circle.fill")
                             }
-                            .buttonStyle(.plain)
+                            .matteButton(isProminent: false, cornerRadius: 8)
+
+                            Button(action: {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: effectiveLibraryPath))
+                            }) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .matteButton(isProminent: false, cornerRadius: 8)
+                            .help("Открыть в Finder")
                         }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
-
-                    Button(action: { importIpaFile() }) {
-                        Label("Импорт IPA", systemImage: "plus.circle")
-                    }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-
-                    Button(action: {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: effectiveLibraryPath))
-                    }) {
-                        Image(systemName: "folder")
-                    }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-                    .help("Открыть в Finder")
-                }
-            }
-
-            if !savedIPAs.isEmpty {
-                HStack(spacing: 10) {
-                    Button(selectedSavedIPAPaths.count == savedIPAs.count ? "Снять выбор" : "Выбрать все (\(savedIPAs.count))") {
-                        if selectedSavedIPAPaths.count == savedIPAs.count {
-                            selectedSavedIPAPaths.removeAll()
-                        } else {
-                            selectedSavedIPAPaths = Set(savedIPAs.map { $0.path })
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-
-                    if !selectedSavedIPAPaths.isEmpty {
-                        Text("Выбрано: \(selectedSavedIPAPaths.count)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.blue)
-
-                        Button(action: { startBatchInstallSavedIPAs() }) {
-                            Label("Установить (\(selectedSavedIPAPaths.count))", systemImage: "arrow.down.to.line.circle.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .roundedCapsuleButton()
-                        .tint(.green)
-                        .controlSize(.small)
-                        .disabled(isBatchInstallingIPAs)
-
-                        Button(action: {
-                            for p in selectedSavedIPAPaths { try? FileManager.default.removeItem(atPath: p) }
-                            selectedSavedIPAPaths.removeAll()
-                            loadSavedIPAs()
-                        }) {
-                            Label("Удалить (\(selectedSavedIPAPaths.count))", systemImage: "trash")
-                                .foregroundColor(.red)
-                        }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
-                        .controlSize(.small)
-                    }
-
-                    Spacer()
-
-                    if isBatchInstallingIPAs {
-                        HStack(spacing: 6) {
-                            ProgressView().scaleEffect(0.6)
-                            Text("Установка: \(batchInstallCurrent)/\(batchInstallTotal)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.green)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(Color.green.opacity(0.06))
-                .overlay(
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.05))
-                        .frame(height: 1),
-                    alignment: .bottom
+                    },
+                    searchQuery: $savedIPASearchQuery,
+                    placeholder: "Поиск среди \(savedIPAs.count) сохраненных IPA..."
                 )
-            }
 
+                // Batch selection bar integrated into matte header
+                if !savedIPAs.isEmpty {
+                    Divider().opacity(0.12)
+                    HStack(spacing: 10) {
+                        Button(selectedSavedIPAPaths.count == savedIPAs.count ? "Снять выбор" : "Выбрать все (\(savedIPAs.count))") {
+                            if selectedSavedIPAPaths.count == savedIPAs.count {
+                                selectedSavedIPAPaths.removeAll()
+                            } else {
+                                selectedSavedIPAPaths = Set(savedIPAs.map { $0.path })
+                            }
+                        }
+                        .matteButton(isProminent: false, cornerRadius: 8)
+
+                        if !selectedSavedIPAPaths.isEmpty {
+                            Text("Выбрано: \(selectedSavedIPAPaths.count)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.blue)
+
+                            Button(action: { startBatchInstallSavedIPAs() }) {
+                                Label("Установить (\(selectedSavedIPAPaths.count))", systemImage: "arrow.down.to.line.circle.fill")
+                            }
+                            .matteButton(isProminent: true, tint: .green, cornerRadius: 8)
+                            .disabled(isBatchInstallingIPAs)
+
+                            Button(action: {
+                                for p in selectedSavedIPAPaths { try? FileManager.default.removeItem(atPath: p) }
+                                selectedSavedIPAPaths.removeAll()
+                                loadSavedIPAs()
+                            }) {
+                                Label("Удалить (\(selectedSavedIPAPaths.count))", systemImage: "trash")
+                                    .foregroundColor(.red)
+                            }
+                            .matteButton(isProminent: false, cornerRadius: 8)
+                        }
+
+                        Spacer()
+
+                        if isBatchInstallingIPAs {
+                            HStack(spacing: 6) {
+                                ProgressView().scaleEffect(0.6)
+                                Text("Установка: \(batchInstallCurrent)/\(batchInstallTotal)")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
+                }
+            }
+        }
+    }
+
+    private var savedIPAsView: some View {
+        Group {
             if savedIPAs.isEmpty {
                 emptyStateView(
                     icon: "archivebox",
                     title: "Библиотека IPA пуста",
                     subtitle: "Скачивайте приложения из покупок Apple ID или нажмите «Импорт IPA», чтобы добавить свои файлы."
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(filteredSavedIPAs) { item in
-                    savedIPARow(item: item)
-                        .listRowSeparator(.visible)
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(filteredSavedIPAs) { item in
+                            savedIPARow(item: item)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
-                .listStyle(.plain)
+                .clipped()
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            savedIPAsHeader
         }
     }
 
@@ -1388,7 +1453,16 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help("Удалить из библиотеки")
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isSelected ? Color.blue.opacity(0.08) : Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
+        )
     }
 
     // MARK: - 5. Settings View (Theme & Library Path)
@@ -1854,7 +1928,9 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding(24)
+            .padding(.horizontal, 24)
+            .padding(.top, (engine.isVpnActive && !vpnNoticeDismissed) ? 16 : 28)
+            .padding(.bottom, 24)
         }
     }
 
@@ -1896,9 +1972,7 @@ struct ContentView: View {
                     appleId2FACodeInput = ""
                     isPasswordVisible = false
                 }
-                .buttonStyle(.bordered)
-                .roundedCapsuleButton()
-                .controlSize(.small)
+                .matteButton(isProminent: false, cornerRadius: 8)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -1972,8 +2046,7 @@ struct ContentView: View {
                         }) {
                             Label("Синхронизировать покупки", systemImage: "arrow.clockwise")
                         }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
+                        .matteButton(isProminent: false, cornerRadius: 8)
 
                         Spacer()
 
@@ -1983,10 +2056,9 @@ struct ContentView: View {
                             }
                         }) {
                             Label("Сменить аккаунт / Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                                .foregroundColor(.red)
                         }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
-                        .tint(.red)
+                        .matteButton(isProminent: false, cornerRadius: 8)
                     }
                 } else {
                     // Login Form
@@ -2174,9 +2246,7 @@ struct ContentView: View {
                                 }
                                 .padding(.horizontal, 16)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .roundedCapsuleButton()
-                            .tint(.blue)
+                            .matteButton(isProminent: true, tint: .blue, cornerRadius: 8)
                             .disabled(isLoggingInAppleId || appleIdEmailInput.isEmpty || appleIdPasswordInput.isEmpty || (is2FARequired && appleId2FACodeInput.trimmingCharacters(in: .whitespaces).isEmpty))
                         }
                     }
@@ -2204,6 +2274,11 @@ struct ContentView: View {
             .padding(20)
         }
         .frame(width: 480)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
         .onAppear {
             if appleIdEmailInput.isEmpty && !engine.activeAppleIdEmail.isEmpty && !engine.activeAppleIdEmail.contains("DSID") && !engine.isDirectAppleIdAuthenticated {
                 appleIdEmailInput = engine.activeAppleIdEmail
@@ -2565,34 +2640,33 @@ struct ContentView: View {
 
                                 VStack(alignment: .leading, spacing: 0) {
                                     deviceInfoRow(label: "Владелец", value: dev.ownerName)
-                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    Divider().opacity(0.25).padding(.vertical, 5)
                                     deviceInfoRow(label: "Имя устройства", value: dev.name)
-                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    Divider().opacity(0.25).padding(.vertical, 5)
                                     deviceInfoRow(label: "Модель", value: "\(dev.marketingName) (\(dev.modelIdentifier))")
-                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    Divider().opacity(0.25).padding(.vertical, 5)
                                     deviceInfoRow(label: "Версия системы", value: dev.iosVersion)
-                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    Divider().opacity(0.25).padding(.vertical, 5)
                                     deviceInfoRow(label: "Тип связи", value: dev.connectionType == .usb ? "USB-кабель (Прямой канал)" : (dev.connectionType == .wifi ? "Wi-Fi сеть (Беспроводная синхронизация)" : "Отключено"))
                                     if !dev.battery.isEmpty {
-                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        Divider().opacity(0.25).padding(.vertical, 5)
                                         deviceInfoRow(label: "Уровень заряда", value: dev.battery)
                                     }
                                     if !dev.diskCapacity.isEmpty {
-                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        Divider().opacity(0.25).padding(.vertical, 5)
                                         deviceInfoRow(label: "Память накопителя", value: dev.diskCapacity)
                                     }
                                     if !dev.serialNumber.isEmpty {
-                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        Divider().opacity(0.25).padding(.vertical, 5)
                                         deviceInfoRow(label: "Серийный номер", value: dev.serialNumber, isMonospaced: true)
                                     }
                                     if !dev.wifiAddress.isEmpty {
-                                        Divider().opacity(0.25).padding(.vertical, 4)
+                                        Divider().opacity(0.25).padding(.vertical, 5)
                                         deviceInfoRow(label: "Wi-Fi MAC-адрес", value: dev.wifiAddress, isMonospaced: true)
                                     }
-                                    Divider().opacity(0.25).padding(.vertical, 4)
+                                    Divider().opacity(0.25).padding(.vertical, 5)
                                     deviceInfoRow(label: "UDID", value: dev.udid, isMonospaced: true)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .padding(14)
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -2763,18 +2837,23 @@ struct ContentView: View {
     }
 
     private func deviceInfoRow(label: String, value: String, isMonospaced: Bool = false) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 0) {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.secondary)
-                .frame(width: 140, alignment: .leading)
+                .frame(width: 130, alignment: .leading)
+            
+            Spacer().frame(width: 12)
             
             Text(value)
                 .font(isMonospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
                 .foregroundColor(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Manual Adam ID Sheet
@@ -3228,9 +3307,10 @@ struct ContentView: View {
             Text("⚠️ «Обнаружен активный VPN. Это может приводить к ошибкам авторизации Apple ID, задержкам кодов 2FA и снижению скорости скачивания, а также существует вероятность временной блокировки аккаунта Apple ID со стороны системы безопасности Apple. При возникновении сбоев рекомендуется временно отключить VPN».")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.primary)
-                .lineLimit(2)
+                .lineLimit(nil)
+                .multilineTextAlignment(.leading)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -3238,13 +3318,17 @@ struct ContentView: View {
                 }
             }) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundColor(.secondary)
+                    .padding(4)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Скрыть предупреждение")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
         .background(Color.orange.opacity(0.12))
         .overlay(Rectangle().fill(Color.orange.opacity(0.25)).frame(height: 1), alignment: .bottom)
     }
@@ -3264,10 +3348,10 @@ struct ContentView: View {
                 Text("⚠️ «Обнаружен активный VPN. Это может приводить к ошибкам авторизации Apple ID, задержкам кодов 2FA и снижению скорости скачивания, а также существует вероятность временной блокировки аккаунта Apple ID со стороны системы безопасности Apple. При возникновении сбоев рекомендуется временно отключить VPN».")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.primary.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
+                    // .fixedSize(horizontal: false, vertical: true) - removed for wrapping
             }
         }
-        .padding(14)
+        .padding(18)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)

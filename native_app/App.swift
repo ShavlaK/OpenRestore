@@ -17,9 +17,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for tool in toolsToKill {
             let task = Process()
             task.launchPath = "/usr/bin/killall"
-            task.arguments = ["-9", tool]
+            task.arguments = ["-TERM", tool]
             try? task.run()
-            task.waitUntilExit()
         }
     }
 
@@ -41,7 +40,7 @@ struct OpenStoreApp: App {
         WindowGroup {
             ContentView()
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .commands {
             SidebarCommands()

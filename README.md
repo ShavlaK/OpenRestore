@@ -65,7 +65,7 @@
 ## 🚀 Быстрый старт
 
 ### Вариант 1: Установка готового приложения (Рекомендуется)
-1. Скачайте последнюю версию **`OpenStore-v1.6.2-Mac-AppleSilicon.dmg`** или **`OpenStore-v1.6.2-Mac-Intel.dmg`** из раздела [Releases](https://github.com/ShavlaK/OpenRestore/releases).
+1. Скачайте последнюю версию **`OpenStore-v1.6.2-Mac-AppleSilicon.dmg`** или **`OpenStore-v1.6.2-Mac-Intel.dmg`** из раздела [Releases](https://github.com/ShavlaK/OpenStore/releases).
 2. Перетяните `Open Store.app` в папку `Программы` (`Applications`).
 3. Запустите приложение.
 
@@ -84,7 +84,7 @@ OpenStore/
 │   ├── App.swift               # Точка входа, фоновые слушатели, очистка старых версий
 │   ├── ConfiguratorEngine.swift# Движок Open Store: IOKit USB, VPN detector, App Nap, DRM
 │   └── ContentView.swift       # Главное окно, Glassmorphism, Device Manager, Update UI
-├── OpenRestore_Windows/        # Версия для Windows (Go 1.26 + Web UI)
+├── OpenStore_Windows/        # Версия для Windows (Go 1.26 + Web UI)
 │   ├── main.go                 # Запуск Windows GUI без консоли
 │   ├── engine.go               # Движок устройств, загрузок и обновлений
 │   └── web/                    # Интерфейс на базе Tailwind CSS
@@ -101,7 +101,7 @@ OpenStore/
 <details>
 <summary><b>Вопрос: Почему приложение закрывается сразу после установки на iPhone?</b></summary>
 <br>
-Все официальные приложения из App Store защищены FairPlay DRM и зашифрованы персональным ключом вашего Apple ID. Чтобы приложение запустилось на iPhone, на устройстве должен быть выполнен вход в <b>тот же самый Apple ID</b> (в Настройках или App Store), с которого производилось скачивание в OpenRestore.
+Все официальные приложения из App Store защищены FairPlay DRM и зашифрованы персональным ключом вашего Apple ID. Чтобы приложение запустилось на iPhone, на устройстве должен быть выполнен вход в <b>тот же самый Apple ID</b> (в Настройках или App Store), с которого производилось скачивание в OpenStore.
 </details>
 
 <details>
@@ -113,7 +113,7 @@ OpenStore/
 <details>
 <summary><b>Вопрос: Безопасно ли вводить пароль Apple ID в приложении?</b></summary>
 <br>
-Да. OpenRestore использует защищённый локальный сессионный ключ Keychain и обращается напрямую к официальным эндпоинтам Apple GrandSlam / StoreKit. Никакие пароли, токены или данные учетной записи не передаются третьим лицам.
+Да. OpenStore использует защищённый локальный сессионный ключ Keychain и обращается напрямую к официальным эндпоинтам Apple GrandSlam / StoreKit. Никакие пароли, токены или данные учетной записи не передаются третьим лицам.
 </details>
 
 ---

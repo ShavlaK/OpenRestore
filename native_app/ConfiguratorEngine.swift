@@ -28,7 +28,7 @@ public final class USBWatcher: @unchecked Sendable {
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
         let matchingCallback: IOServiceMatchingCallback = { refcon, iterator in
-            while IOIteratorNext(iterator) != 0 {}
+            var obj = IOIteratorNext(iterator); while obj != 0 { IOObjectRelease(obj); obj = IOIteratorNext(iterator) }
             guard let refcon = refcon else { return }
             let watcher = Unmanaged<USBWatcher>.fromOpaque(refcon).takeUnretainedValue()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
@@ -39,22 +39,22 @@ public final class USBWatcher: @unchecked Sendable {
         IOServiceAddMatchingNotification(
             notifyPort,
             kIOFirstMatchNotification,
-            matchingDict.mutableCopy() as! CFDictionary,
+            (matchingDict.mutableCopy() as! CFDictionary),
             matchingCallback,
             selfPtr,
             &addedIter
         )
-        while IOIteratorNext(addedIter) != 0 {}
+        var addedObj = IOIteratorNext(addedIter); while addedObj != 0 { IOObjectRelease(addedObj); addedObj = IOIteratorNext(addedIter) }
 
         IOServiceAddMatchingNotification(
             notifyPort,
             kIOTerminatedNotification,
-            matchingDict.mutableCopy() as! CFDictionary,
+            (matchingDict.mutableCopy() as! CFDictionary),
             matchingCallback,
             selfPtr,
             &removedIter
         )
-        while IOIteratorNext(removedIter) != 0 {}
+        var removedObj = IOIteratorNext(removedIter); while removedObj != 0 { IOObjectRelease(removedObj); removedObj = IOIteratorNext(removedIter) }
     }
 
     deinit {
@@ -87,7 +87,7 @@ public final class StandaloneToolchain: @unchecked Sendable {
     public init() {
         let home = NSHomeDirectory()
         let newAppSupport = "\(home)/Library/Application Support/Open Store"
-        let oldAppSupport = "\(home)/Library/Application Support/OpenRestore"
+        let oldAppSupport = "\(home)/Library/Application Support/OpenStore"
         if !FileManager.default.fileExists(atPath: newAppSupport) && FileManager.default.fileExists(atPath: oldAppSupport) {
             try? FileManager.default.moveItem(atPath: oldAppSupport, toPath: newAppSupport)
         }
@@ -420,7 +420,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     public static let libraryDir: String = {
         let home = NSHomeDirectory()
         let newDir = "\(home)/Downloads/Open Store"
-        let oldDir = "\(home)/Downloads/OpenRestore"
+        let oldDir = "\(home)/Downloads/OpenStore"
         if !FileManager.default.fileExists(atPath: newDir) && FileManager.default.fileExists(atPath: oldDir) {
             try? FileManager.default.moveItem(atPath: oldDir, toPath: newDir)
         }
@@ -1201,10 +1201,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
 
     public static func mapMarketingName(_ identifier: String, modelNumber: String = "") -> String {
         let id = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        let mNum = modelNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-
-        let map: [String: String] = [
-            // iPhone Models (Canonical 63 models)
+        let modelMap: [String: String] = [
             "iPhone1,1": "iPhone (Original / 2G)",
             "iPhone1,2": "iPhone 3G",
             "iPhone2,1": "iPhone 3GS",
@@ -1268,8 +1265,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             "iPhone18,3": "iPhone 17",
             "iPhone18,4": "iPhone Air",
             "iPhone18,5": "iPhone 17e",
-
-            // iPod touch Models
             "iPod1,1": "iPod touch (1-го поколения)",
             "iPod2,1": "iPod touch (2-го поколения)",
             "iPod3,1": "iPod touch (3-го поколения)",
@@ -1277,8 +1272,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             "iPod5,1": "iPod touch (5-го поколения)",
             "iPod7,1": "iPod touch (6-го поколения)",
             "iPod9,1": "iPod touch (7-го поколения)",
-
-            // iPad (Базовый)
             "iPad1,1": "iPad (1-го поколения) [Wi-Fi / Cellular]",
             "iPad2,1": "iPad 2 (Wi-Fi)",
             "iPad2,2": "iPad 2 (GSM)",
@@ -1302,10 +1295,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             "iPad12,2": "iPad (9-го поколения, Cellular)",
             "iPad13,18": "iPad (10-го поколения, Wi-Fi)",
             "iPad13,19": "iPad (10-го поколения, Cellular)",
-            "iPad16,3": "iPad (11-го поколения, Wi-Fi, чип A16)",
-            "iPad16,4": "iPad (11-го поколения, Cellular, чип A16)",
-
-            // iPad Air
             "iPad4,1": "iPad Air (1-го поколения, Wi-Fi)",
             "iPad4,2": "iPad Air (1-го поколения, Cellular)",
             "iPad4,3": "iPad Air (1-го поколения, Китайский регион)",
@@ -1329,8 +1318,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             "iPad17,6": "iPad Air 11-inch (чип M4, Cellular)",
             "iPad17,7": "iPad Air 13-inch (чип M4, Wi-Fi)",
             "iPad17,8": "iPad Air 13-inch (чип M4, Cellular)",
-
-            // iPad mini
             "iPad2,5": "iPad mini (1-го поколения, Wi-Fi)",
             "iPad2,6": "iPad mini (1-го поколения, GSM)",
             "iPad2,7": "iPad mini (1-го поколения, Global)",
@@ -1348,8 +1335,6 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             "iPad14,2": "iPad mini (6-го поколения, Cellular)",
             "iPad16,1": "iPad mini (7-го поколения, чип A17 Pro, Wi-Fi)",
             "iPad16,2": "iPad mini (7-го поколения, чип A17 Pro, Cellular)",
-
-            // iPad Pro
             "iPad6,3": "iPad Pro 9.7-inch (Wi-Fi)",
             "iPad6,4": "iPad Pro 9.7-inch (Cellular)",
             "iPad6,7": "iPad Pro 12.9-inch (1-го поколения, Wi-Fi)",
@@ -1382,45 +1367,16 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
             "iPad14,4": "iPad Pro 11-inch (4-го поколения, чип M2, Cellular)",
             "iPad14,5": "iPad Pro 12.9-inch (6-го поколения, чип M2, Wi-Fi)",
             "iPad14,6": "iPad Pro 12.9-inch (6-го поколения, чип M2, Cellular)",
+            "iPad16,3": "iPad Pro 11-inch (чип M4, Wi-Fi)",
+            "iPad16,4": "iPad Pro 11-inch (чип M4, Cellular)",
             "iPad16,5": "iPad Pro 13-inch (чип M4, Wi-Fi)",
             "iPad16,6": "iPad Pro 13-inch (чип M4, Cellular)",
             "iPad17,1": "iPad Pro 11-inch (чип M5, Wi-Fi)",
             "iPad17,2": "iPad Pro 11-inch (чип M5, Cellular)",
             "iPad17,3": "iPad Pro 13-inch (чип M5, Wi-Fi)",
-            "iPad17,4": "iPad Pro 13-inch (чип M5, Cellular)"
+            "iPad17,4": "iPad Pro 13-inch (чип M5, Cellular)",
         ]
-
-        if let name = map[id] { return name }
-
-        let modelMap: [String: String] = [
-            "A3296": "iPhone 16 Pro Max", "A3297": "iPhone 16 Pro Max", "A3295": "iPhone 16 Pro Max", "A3084": "iPhone 16 Pro Max",
-            "A3293": "iPhone 16 Pro", "A3294": "iPhone 16 Pro", "A3292": "iPhone 16 Pro", "A3083": "iPhone 16 Pro",
-            "A3290": "iPhone 16 Plus", "A3291": "iPhone 16 Plus", "A3289": "iPhone 16 Plus", "A3082": "iPhone 16 Plus",
-            "A3287": "iPhone 16", "A3288": "iPhone 16", "A3286": "iPhone 16", "A3081": "iPhone 16",
-            "A3106": "iPhone 15 Pro Max", "A3108": "iPhone 15 Pro Max", "A2849": "iPhone 15 Pro Max", "A3105": "iPhone 15 Pro Max",
-            "A3102": "iPhone 15 Pro", "A3104": "iPhone 15 Pro", "A2848": "iPhone 15 Pro", "A3101": "iPhone 15 Pro",
-            "A3094": "iPhone 15 Plus", "A3096": "iPhone 15 Plus", "A2847": "iPhone 15 Plus", "A3093": "iPhone 15 Plus",
-            "A3090": "iPhone 15", "A3092": "iPhone 15", "A2846": "iPhone 15", "A3089": "iPhone 15",
-            "A2894": "iPhone 14 Pro Max", "A2896": "iPhone 14 Pro Max", "A2651": "iPhone 14 Pro Max",
-            "A2890": "iPhone 14 Pro", "A2892": "iPhone 14 Pro", "A2650": "iPhone 14 Pro",
-            "A2886": "iPhone 14 Plus", "A2888": "iPhone 14 Plus", "A2632": "iPhone 14 Plus",
-            "A2882": "iPhone 14", "A2884": "iPhone 14", "A2649": "iPhone 14",
-            "A2643": "iPhone 13 Pro Max", "A2644": "iPhone 13 Pro Max", "A2484": "iPhone 13 Pro Max",
-            "A2638": "iPhone 13 Pro", "A2639": "iPhone 13 Pro", "A2483": "iPhone 13 Pro",
-            "A2633": "iPhone 13", "A2634": "iPhone 13", "A2482": "iPhone 13",
-            "A2628": "iPhone 13 mini", "A2629": "iPhone 13 mini", "A2481": "iPhone 13 mini",
-            "A2411": "iPhone 12 Pro Max", "A2412": "iPhone 12 Pro Max", "A2342": "iPhone 12 Pro Max",
-            "A2407": "iPhone 12 Pro", "A2408": "iPhone 12 Pro", "A2341": "iPhone 12 Pro",
-            "A2403": "iPhone 12", "A2404": "iPhone 12", "A2172": "iPhone 12",
-            "A2399": "iPhone 12 mini", "A2400": "iPhone 12 mini", "A2176": "iPhone 12 mini",
-            "A2218": "iPhone 11 Pro Max", "A2220": "iPhone 11 Pro Max", "A2161": "iPhone 11 Pro Max",
-            "A2215": "iPhone 11 Pro", "A2217": "iPhone 11 Pro", "A2160": "iPhone 11 Pro",
-            "A2221": "iPhone 11", "A2223": "iPhone 11", "A2111": "iPhone 11",
-            "A2783": "iPhone SE (3-го пок.)", "A2784": "iPhone SE (3-го пок.)", "A2595": "iPhone SE (3-го пок.)",
-            "A2275": "iPhone SE (2-го пок.)", "A2296": "iPhone SE (2-го пок.)", "A2298": "iPhone SE (2-го пок.)"
-        ]
-
-        if !mNum.isEmpty, let mName = modelMap[mNum] { return mName }
+        if let mName = modelMap[id] { return mName }
         if id.starts(with: "iPhone") { return "iPhone (\(id))" }
         if id.starts(with: "iPad") { return "iPad (\(id))" }
         if id.starts(with: "iPod") { return "iPod touch (\(id))" }
@@ -1559,10 +1515,14 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         if (devName == "iPhone" || devName.isEmpty), let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty {
                             devName = known.name
                         }
+                        
+                        let ownerName = Self.extractOwnerName(from: devName)
+                        let ownerDisplay = ownerName.isEmpty ? "" : " (\(ownerName))"
+                        let formattedName = "\(marketingName.isEmpty ? "iPhone" : marketingName)\(ownerDisplay)"
 
                         discoveredMap[udid] = DeviceInfo(
-                            name: devName,
-                            ownerName: Self.extractOwnerName(from: devName),
+                            name: formattedName,
+                            ownerName: ownerName,
                             modelIdentifier: devType,
                             marketingName: marketingName.isEmpty ? devName : marketingName,
                             iosVersion: "iOS",
@@ -1579,7 +1539,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         // LAYER 1: ios list --details (go-ios lockdown query with NDJSON resilience)
         if FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list", "--details"], timeout: 6.0)
             if status == 0 && !data.isEmpty, let rawString = String(data: data, encoding: .utf8) {
                 for line in rawString.components(separatedBy: .newlines) {
                     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1600,12 +1560,15 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                         let marketingName = Self.mapMarketingName(productType, modelNumber: "")
                         let fallbackName = marketingName.isEmpty ? "iPhone" : marketingName
 
-                        var devName = fallbackName
-                        if let existing = discoveredMap[udid], !existing.name.isEmpty && existing.name != "iPhone" {
-                            devName = existing.name
-                        } else if let known = currentKnown.first(where: { $0.udid == udid }), !known.name.isEmpty, known.name != "iPhone" {
-                            devName = known.name
+                        var rawOwnerName = ""
+                        if let existing = discoveredMap[udid] {
+                            rawOwnerName = existing.ownerName
+                        } else if let known = currentKnown.first(where: { $0.udid == udid }) {
+                            rawOwnerName = known.ownerName
                         }
+                        
+                        let ownerDisplay = rawOwnerName.isEmpty ? "" : " (\(rawOwnerName))"
+                        let devName = "\(fallbackName)\(ownerDisplay)"
 
                         let iosVersion = productVer.isEmpty ? "iOS" : (productVer.starts(with: "iOS") ? productVer : "iOS \(productVer)")
                         let existingEcid = discoveredMap[udid]?.ecid ?? ""
@@ -1650,7 +1613,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         // LAYER 2: Fallback to simple `ios list`
         if discoveredMap.isEmpty && FileManager.default.isExecutableFile(atPath: iosBin) {
-            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list"], timeout: 4.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+            let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["list"], timeout: 4.0)
             if status == 0 && !data.isEmpty, let rawString = String(data: data, encoding: .utf8) {
                 for line in rawString.components(separatedBy: .newlines) {
                     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1748,7 +1711,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 guard let self = self else { return }
                 for dev in devicesToEnrich where dev.name == "iPhone" || dev.name == "iPad" {
-                    let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(dev.udid)"], timeout: 4.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                    let (nameStatus, nameData) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: ["devicename", "--udid=\(dev.udid)"], timeout: 4.0)
                     if nameStatus == 0, let rawName = String(data: nameData, encoding: .utf8) {
                         for line in rawName.components(separatedBy: .newlines) {
                             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1879,7 +1842,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
                     args.append("--udid=\(targetUdid)")
                 }
 
-                let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: args, timeout: 30.0, env: ["ENABLE_GO_IOS_AGENT": "user"])
+                let (status, data) = Self.runProcessWithSafeOutput(executable: iosBin, arguments: args, timeout: 30.0)
                 if status == 0 && !data.isEmpty {
                     var appsArray: [[String: Any]] = []
 
@@ -2799,7 +2762,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         guard let targetFolder = foundFolder else {
             let errMsg = "Превышено время ожидания загрузки (ID: \(adamId)). Логи записаны в журнал отладки."
             LogManager.shared.log("❌ Ошибка тайм-аута. Ни в одном каталоге не обнаружено скачанных файлов для ID \(adamId)", level: "TIMEOUT")
-            throw NSError(domain: "OpenRestore", code: 4, userInfo: [NSLocalizedDescriptionKey: errMsg])
+            throw NSError(domain: "OpenStore", code: 4, userInfo: [NSLocalizedDescriptionKey: errMsg])
         }
 
         appendLog("📦 Зафиксирован активный каталог загрузки: \(targetFolder)")
@@ -2966,7 +2929,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         }
         // 3. *.app bundle found (no Payload parent)
         else if let appPath = foundAppBundles.first {
-            let stageDir = "\(NSTemporaryDirectory())OpenRestore_Stage_\(UUID().uuidString)"
+            let stageDir = "\(NSTemporaryDirectory())OpenStore_Stage_\(UUID().uuidString)"
             let payloadDir = "\(stageDir)/Payload"
             let appNameOnly = URL(fileURLWithPath: appPath).lastPathComponent
             try? fm.createDirectory(atPath: payloadDir, withIntermediateDirectories: true, attributes: nil)
@@ -3590,7 +3553,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         let repoUrls = [
             "https://api.github.com/repos/ShavlaK/OpenStore/releases/latest",
-            "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest"
+            "https://api.github.com/repos/ShavlaK/OpenStore/releases/latest"
         ]
 
         var lastErr = "Ошибка сети при проверке обновлений"

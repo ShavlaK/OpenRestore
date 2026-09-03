@@ -1,72 +1,47 @@
-# macOS system files
+# Xcode
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+
+# macOS
 .DS_Store
 .AppleDouble
 .LSOverride
-._*
-.Trash/
+Icon
 
-# Build & temp directories
-module_cache/
-__pycache__/
-*.pyc
-*.pyo
-venv/
-.venv/
-env/
-scratch/
+# Temporary build files
 build_tmp/
 tmp_arch/
-OpenRestore_Release/
 dist/
-bmrng_new_inspect/
+OpenRestore_Release/
 
-# Logs & temp files
-*.log
-*.tmp
-*.temp
-.tempmediaStorage/
-.user_uploaded/
-native_app/scratch_test_ipatool.swift
-
-# User-specific keychain artifacts
-*.crt
-*.key
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.secret
+*.pem
+*.cer
 *.p12
-*.cnf
-selfIdentity.plist
+scratch/
 
-# Large IPAs
-*.ipa
-Downloads/
-OpenRestore_Library/
-OpenRestore.app/
-Open Store.app/
-
-# Agent local skills
-.agent/
-
-# Internal dev & reverse engineering protection
-*.py
-OpenRestore_Windows/src/
-tools/
-fix_*.py
-fix_*.sh
-scratch_*.py
-test_*.py
-test_*.swift
-openrestore.py
-ios_core.py
-configurator_db.py
-device_manager.py
-asset_watcher.py
-ui_automation.py
-web_server.py
-run.sh
-OpenRestore.command
-requirements.txt
-OpenRestore_Windows/requirements.txt
-OpenRestore_Windows/bin/os-agent.exe
-OpenRestore_Windows/bin/os-store-helper.exe
-OpenRestore_Windows/OpenStore.exe
-OpenRestore_Windows/OpenRestore.exe
-
+# Logs
+*.log
