@@ -1,0 +1,14 @@
+{
+  "latest_version": "1.6.3",
+  "min_supported_version": "1.6.3",
+  "mandatory": true,
+  "release_tag": "v1.6.3",
+  "published_at": "2026-09-04T12:00:00Z",
+  "release_notes": "Open Store v1.6.3: обновленный дизайн, стабильное фоновое подключение и автообновление.",
+  "downloads": {
+    "mac_arm64": "https://github.com/ShavlaK/OpenStore/releases/download/v1.6.3/OpenStore-v1.6.3-Mac-AppleSilicon.zip",
+    "mac_x86_64": "https://github.com/ShavlaK/OpenStore/releases/download/v1.6.3/OpenStore-v1.6.3-Mac-Intel.zip",
+    "mac_universal": "https://github.com/ShavlaK/OpenStore/releases/download/v1.6.3/OpenStore-v1.6.3-macOS.zip",
+    "windows_x64": "https://github.com/ShavlaK/OpenStore/releases/download/v1.6.3/OpenStore-v1.6.3-Windows-x64.zip"
+  }
+}

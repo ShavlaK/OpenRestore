@@ -1,0 +1,626 @@
+{
+  "apps": [
+    {
+      "name": "Онлайн (СберБанк)",
+      "bundle_id": "com.digit.budg",
+      "bundle_ids": [
+        "com.digit.budg",
+        "ru.sberbank.onlineiphone",
+        "ru.sberbank.sbol",
+        "ru.sberbank.ios.sbol",
+        "ru.sber.sbol",
+        "ru.sberbank.invest",
+        "ru.sber.budget"
+      ],
+      "adam_id": 6749261529,
+      "category": "Банки и финансы",
+      "description": "СберБанк Онлайн (версия Онлайн)"
+    },
+    {
+      "name": "Мой Отзыв (Т-Банк / Тинькофф)",
+      "bundle_id": "ru.myreview",
+      "bundle_ids": [
+        "ru.myreview",
+        "com.tcsbank.mobile",
+        "com.tcsbank.business",
+        "ru.tinkoff.invest",
+        "ru.tinkoff.junior"
+      ],
+      "adam_id": 6754170588,
+      "category": "Банки и финансы",
+      "description": "Т-Банк (версия Мой Отзыв)"
+    },
+    {
+      "name": "Накопи Фест (ВТБ Онлайн)",
+      "bundle_id": "com.whenly.app",
+      "bundle_ids": [
+        "com.whenly.app",
+        "ru.vtb24.mobilebanking.ios",
+        "ru.vtb.mobilebanking",
+        "ru.vtb.invest"
+      ],
+      "adam_id": 6759036480,
+      "category": "Банки и финансы",
+      "description": "ВТБ Онлайн (версия Накопи Фест)"
+    },
+    {
+      "name": "ФинГрам (Совкомбанк)",
+      "bundle_id": "ru.fingram",
+      "bundle_ids": [
+        "ru.fingram",
+        "ru.sovcomcard.halva",
+        "ru.sovcombank.business"
+      ],
+      "adam_id": 6758455334,
+      "category": "Банки и финансы",
+      "description": "Финграм (клиент Совкомбанк)"
+    },
+    {
+      "name": "РС Онлайн (Банк Русский Стандарт)",
+      "bundle_id": "com.rsins.rs",
+      "bundle_ids": [
+        "com.rsins.rs"
+      ],
+      "adam_id": 6446702225,
+      "category": "Банки и финансы",
+      "description": "Русский Стандарт Онлайн"
+    },
+    {
+      "name": "Ягодный Фест",
+      "bundle_id": "com.berries.volfest.berriesVolfest",
+      "bundle_ids": [
+        "com.berries.volfest.berriesVolfest"
+      ],
+      "adam_id": 6754039506,
+      "category": "Покупки",
+      "description": "Ягодный Фест (клиент маркетплейса)"
+    },
+    {
+      "name": "УП - доставка",
+      "bundle_id": "ru.smartbuys.delivery",
+      "bundle_ids": [
+        "ru.smartbuys.delivery"
+      ],
+      "adam_id": 6744347739,
+      "category": "Доставка и еда",
+      "description": "УП - доставка продуктов"
+    },
+    {
+      "name": "Сравни",
+      "bundle_id": "ru.sravni",
+      "bundle_ids": [
+        "ru.sravni"
+      ],
+      "adam_id": 6755602284,
+      "category": "Банки и финансы",
+      "description": "Сравни.ру - подбор кредитов и страховок"
+    },
+    {
+      "name": "Яндекс Пэй",
+      "bundle_id": "com.yandex.fintech.bank-app",
+      "bundle_ids": [
+        "com.yandex.fintech.bank-app"
+      ],
+      "adam_id": 1634422317,
+      "category": "Банки и финансы",
+      "description": "Яндекс Пэй и Сейвы"
+    },
+    {
+      "name": "Чижик",
+      "bundle_id": "club.chizhik.iosapp",
+      "bundle_ids": [
+        "club.chizhik.iosapp"
+      ],
+      "adam_id": 1604205783,
+      "category": "Покупки",
+      "description": "Сеть магазинов Чижик"
+    },
+    {
+      "name": "Дом (ГИС ЖКХ)",
+      "bundle_id": "ru.sigma.gisgkh",
+      "bundle_ids": [
+        "ru.sigma.gisgkh"
+      ],
+      "adam_id": 1437518854,
+      "category": "Утилиты",
+      "description": "Госуслуги Дом"
+    },
+    {
+      "name": "ВКонтакте",
+      "bundle_id": "com.vk.vkclient",
+      "bundle_ids": [
+        "com.vk.vkclient",
+        "com.vk.vkclient.ios",
+        "com.vk.VKMiniApps"
+      ],
+      "adam_id": 564177498,
+      "category": "Социальные сети",
+      "description": "Официальный клиент социальной сети ВКонтакте"
+    },
+    {
+      "name": "СберБанк (СБОЛ / Сбер)",
+      "bundle_id": "ru.sberbank.onlineiphone",
+      "bundle_ids": [
+        "ru.sberbank.onlineiphone",
+        "ru.sberbank.sbol",
+        "ru.sberbank.ios.sbol",
+        "ru.sber.sbol",
+        "ru.sberbank.invest"
+      ],
+      "adam_id": 492224193,
+      "category": "Банки и финансы",
+      "description": "СберБанк Онлайн (оригинальный App Store ID)"
+    },
+    {
+      "name": "Т-Банк (Тинькофф)",
+      "bundle_id": "com.tcsbank.mobile",
+      "bundle_ids": [
+        "com.tcsbank.mobile",
+        "com.tcsbank.business",
+        "ru.tinkoff.invest",
+        "ru.tinkoff.junior"
+      ],
+      "adam_id": 458663497,
+      "category": "Банки и финансы",
+      "description": "Мобильный банк Тинькофф / Т-Банк"
+    },
+    {
+      "name": "Альфа-Банк",
+      "bundle_id": "ru.alfabank.mobile.ios",
+      "bundle_ids": [
+        "ru.alfabank.mobile.ios",
+        "ru.alfabank.mobile",
+        "ru.alfabank.investments",
+        "ru.alfabank.business"
+      ],
+      "adam_id": 359397980,
+      "category": "Банки и финансы",
+      "description": "Альфа-Банк для iOS"
+    },
+    {
+      "name": "ВТБ Онлайн",
+      "bundle_id": "ru.vtb24.mobilebanking.ios",
+      "bundle_ids": [
+        "ru.vtb24.mobilebanking.ios",
+        "ru.vtb.mobilebanking",
+        "ru.vtb.invest"
+      ],
+      "adam_id": 413284506,
+      "category": "Банки и финансы",
+      "description": "ВТБ Мобильный банк"
+    },
+    {
+      "name": "Самокат: доставка продуктов",
+      "bundle_id": "ru.sbcs.storefront",
+      "bundle_ids": [
+        "ru.sbcs.storefront",
+        "ru.samokat.ios"
+      ],
+      "adam_id": 1447012971,
+      "category": "Доставка и еда",
+      "description": "Самокат - доставка продуктов за 15 минут"
+    },
+    {
+      "name": "Финграм-финансовая грамотность",
+      "bundle_id": "ru.fingram",
+      "bundle_ids": [
+        "ru.fingram"
+      ],
+      "adam_id": 6758455334,
+      "category": "Банки и финансы",
+      "description": "Финграм (клиент Совкомбанк)"
+    },
+    {
+      "name": "Золотое Яблоко",
+      "bundle_id": "ru.goldenapple",
+      "bundle_ids": [
+        "ru.goldenapple"
+      ],
+      "adam_id": 1154436683,
+      "category": "Покупки",
+      "description": "Золотое Яблоко - парфюмерия и косметика"
+    },
+    {
+      "name": "Мегамаркет",
+      "bundle_id": "ru.goods.mobile",
+      "bundle_ids": [
+        "ru.goods.mobile",
+        "ru.goods.buyer"
+      ],
+      "adam_id": 1439243764,
+      "category": "Покупки",
+      "description": "Маркетплейс Мегамаркет"
+    },
+    {
+      "name": "Ozon Travel",
+      "bundle_id": "travel.ozon.app",
+      "bundle_ids": [
+        "travel.ozon.app",
+        "travel.ozon.ios"
+      ],
+      "adam_id": 1529813527,
+      "category": "Путешествия",
+      "description": "Ozon Travel - авиа и ж/д билеты, отели"
+    },
+    {
+      "name": "Ozon",
+      "bundle_id": "ru.ozon.app.ios",
+      "bundle_ids": [
+        "ru.ozon.app.ios",
+        "ru.ozon.buyer"
+      ],
+      "adam_id": 407107779,
+      "category": "Покупки",
+      "description": "Маркетплейс Ozon"
+    },
+    {
+      "name": "Wildberries",
+      "bundle_id": "ru.wildberries.buyer",
+      "bundle_ids": [
+        "ru.wildberries.buyer"
+      ],
+      "adam_id": 594913976,
+      "category": "Покупки",
+      "description": "Маркетплейс Wildberries"
+    },
+    {
+      "name": "Авито",
+      "bundle_id": "com.avito.general",
+      "bundle_ids": [
+        "com.avito.general"
+      ],
+      "adam_id": 417281773,
+      "category": "Объявления",
+      "description": "Авито - объявления, авто, недвижимость"
+    },
+    {
+      "name": "2ГИС (2GIS)",
+      "bundle_id": "ru.dublgis.dgismobile",
+      "bundle_ids": [
+        "ru.dublgis.dgismobile",
+        "ru.dublgis.2gis"
+      ],
+      "adam_id": 481627348,
+      "category": "Навигация и карты",
+      "description": "Карты, справочник и навигатор 2ГИС"
+    },
+    {
+      "name": "Газпромбанк",
+      "bundle_id": "ru.gazprombank.telecard.ios",
+      "bundle_ids": [
+        "ru.gazprombank.telecard.ios",
+        "ru.gazprombank.investments"
+      ],
+      "adam_id": 493392694,
+      "category": "Банки и финансы",
+      "description": "Мобильный банк Газпромбанк"
+    },
+    {
+      "name": "Райффайзенбанк",
+      "bundle_id": "ru.raiffeisen.online",
+      "bundle_ids": [
+        "ru.raiffeisen.online",
+        "ru.raiffeisen.business"
+      ],
+      "adam_id": 468307228,
+      "category": "Банки и финансы",
+      "description": "Райффайзен Онлайн"
+    },
+    {
+      "name": "Открытие",
+      "bundle_id": "com.openbank",
+      "bundle_ids": [
+        "com.openbank",
+        "com.openbank.invest"
+      ],
+      "adam_id": 551939103,
+      "category": "Банки и финансы",
+      "description": "Банк Открытие"
+    },
+    {
+      "name": "Росбанк",
+      "bundle_id": "ru.rosbank.mobile",
+      "bundle_ids": [
+        "ru.rosbank.mobile"
+      ],
+      "adam_id": 501309324,
+      "category": "Банки и финансы",
+      "description": "РОСБАНК Онлайн"
+    },
+    {
+      "name": "Совкомбанк (Халва)",
+      "bundle_id": "ru.sovcomcard.halva",
+      "bundle_ids": [
+        "ru.sovcomcard.halva",
+        "ru.sovcombank.business"
+      ],
+      "adam_id": 1205364805,
+      "category": "Банки и финансы",
+      "description": "Халва - Совкомбанк"
+    },
+    {
+      "name": "ПСБ (Промсвязьбанк)",
+      "bundle_id": "ru.psbank.mobile",
+      "bundle_ids": [
+        "ru.psbank.mobile",
+        "ru.psbank.business"
+      ],
+      "adam_id": 546258320,
+      "category": "Банки и финансы",
+      "description": "ПСБ Мобильный банк"
+    },
+    {
+      "name": "Telegram Messenger",
+      "bundle_id": "ph.telegra.Telegraph",
+      "bundle_ids": [
+        "ph.telegra.Telegraph"
+      ],
+      "adam_id": 686449807,
+      "category": "Мессенджеры",
+      "description": "Telegram"
+    },
+    {
+      "name": "Gmail",
+      "bundle_id": "com.google.Gmail",
+      "bundle_ids": [
+        "com.google.Gmail"
+      ],
+      "adam_id": 422689480,
+      "category": "Почта",
+      "description": "Gmail - почта от Google"
+    },
+    {
+      "name": "米家 - Mi Home",
+      "bundle_id": "com.xiaomi.mihome",
+      "bundle_ids": [
+        "com.xiaomi.mihome"
+      ],
+      "adam_id": 957323480,
+      "category": "Умный дом",
+      "description": "Управление устройствами Xiaomi"
+    },
+    {
+      "name": "Outline App",
+      "bundle_id": "org.outline.ios.client",
+      "bundle_ids": [
+        "org.outline.ios.client"
+      ],
+      "adam_id": 1356177741,
+      "category": "Утилиты",
+      "description": "Outline VPN Client"
+    },
+    {
+      "name": "Happ - Proxy Utility",
+      "bundle_id": "su.ffg.happ",
+      "bundle_ids": [
+        "su.ffg.happ"
+      ],
+      "adam_id": 6504287215,
+      "category": "Утилиты",
+      "description": "Happ VPN & Proxy Client"
+    },
+    {
+      "name": "ChatGPT",
+      "bundle_id": "com.openai.chat",
+      "bundle_ids": [
+        "com.openai.chat"
+      ],
+      "adam_id": 6448311069,
+      "category": "Производительность",
+      "description": "Официальное приложение OpenAI ChatGPT"
+    },
+    {
+      "name": "PS Remote Play",
+      "bundle_id": "com.playstation.RemotePlay",
+      "bundle_ids": [
+        "com.playstation.RemotePlay",
+        "com.playstation.remoteplay"
+      ],
+      "adam_id": 888890127,
+      "category": "Игры",
+      "description": "PlayStation Remote Play"
+    },
+    {
+      "name": "Spaceteam (Тестовое)",
+      "bundle_id": "com.sleepingbeastgames.spaceteam",
+      "bundle_ids": [
+        "com.sleepingbeastgames.spaceteam"
+      ],
+      "adam_id": 570510529,
+      "category": "Игры / Тест",
+      "description": "Бесплатное приложение для тестирования"
+    },
+    {
+      "name": "VLC for Mobile",
+      "bundle_id": "org.videolan.vlc-ios",
+      "bundle_ids": [
+        "org.videolan.vlc-ios"
+      ],
+      "adam_id": 650377962,
+      "category": "Медиа",
+      "description": "VLC медиаплеер"
+    },
+    {
+      "name": "Тинькофф (Т-Банк)",
+      "bundle_id": "ru.tcsbank.mobileclient",
+      "bundle_ids": [
+        "ru.tcsbank.mobileclient",
+        "com.tcsbank.mobile"
+      ],
+      "adam_id": 458663497,
+      "category": "Банки и финансы",
+      "description": "Официальное приложение банка Тинькофф / Т-Банк"
+    },
+    {
+      "name": "Яндекс Банк",
+      "bundle_id": "com.yandex.fintech.bank-app",
+      "bundle_ids": [
+        "com.yandex.fintech.bank-app"
+      ],
+      "adam_id": 1618218671,
+      "category": "Банки и финансы",
+      "description": "Яндекс Пэй и Яндекс Банк для iOS"
+    },
+    {
+      "name": "ОТП Банк",
+      "bundle_id": "ru.otpbank.mobile",
+      "bundle_ids": [
+        "ru.otpbank.mobile"
+      ],
+      "adam_id": 585573489,
+      "category": "Банки и финансы",
+      "description": "ОТП Банк онлайн для iOS"
+    },
+    {
+      "name": "Ozon Банк",
+      "bundle_id": "ru.ozon.fintech.finance",
+      "bundle_ids": [
+        "ru.ozon.fintech.finance"
+      ],
+      "adam_id": 1629853924,
+      "category": "Банки и финансы",
+      "description": "Официальное приложение Озон Банк"
+    },
+    {
+      "name": "РС Онлайн (Русский Стандарт)",
+      "bundle_id": "com.rsins.rs",
+      "bundle_ids": [
+        "com.rsins.rs"
+      ],
+      "adam_id": 442531649,
+      "category": "Банки и финансы",
+      "description": "Мобильный банк Русский Стандарт"
+    },
+    {
+      "name": "Все карты",
+      "bundle_id": "ru.allfinance",
+      "bundle_ids": [
+        "ru.allfinance"
+      ],
+      "adam_id": 1668270529,
+      "category": "Банки и финансы",
+      "description": "Все карты / банковский клиент"
+    },
+    {
+      "name": "Сравни",
+      "bundle_id": "ru.sravni",
+      "bundle_ids": [
+        "ru.sravni"
+      ],
+      "adam_id": 1546781290,
+      "category": "Банки и финансы",
+      "description": "Сравни.ру — ОСАГО, кредиты, вклады"
+    },
+    {
+      "name": "Online (Ингосстрах Банк)",
+      "bundle_id": "com.digit.budg",
+      "bundle_ids": [
+        "com.digit.budg",
+        "com.inv.gen"
+      ],
+      "adam_id": 1664188736,
+      "category": "Банки и финансы",
+      "description": "Мобильный банк Ингосстрах"
+    },
+    {
+      "name": "Авито",
+      "bundle_id": "ru.avito.app",
+      "bundle_ids": [
+        "ru.avito.app"
+      ],
+      "adam_id": 417281773,
+      "category": "Покупки и объявления",
+      "description": "Авито: объявления, авто, недвижимость, работа"
+    },
+    {
+      "name": "VK Видео",
+      "bundle_id": "com.vk.vkvideo.prod",
+      "bundle_ids": [
+        "com.vk.vkvideo.prod"
+      ],
+      "adam_id": 6449195328,
+      "category": "Медиа и видео",
+      "description": "Официальное приложение VK Видео"
+    },
+    {
+      "name": "Почта Mail.ru",
+      "bundle_id": "ru.mail.mail",
+      "bundle_ids": [
+        "ru.mail.mail"
+      ],
+      "adam_id": 511310430,
+      "category": "Почта и связь",
+      "description": "Почтовый клиент Mail.ru"
+    },
+    {
+      "name": "Облако Mail.ru",
+      "bundle_id": "ru.mail.cloud",
+      "bundle_ids": [
+        "ru.mail.cloud"
+      ],
+      "adam_id": 696558481,
+      "category": "Утилиты",
+      "description": "Облачное хранилище Mail.ru"
+    },
+    {
+      "name": "Одноклассники (OK)",
+      "bundle_id": "ru.odnoklassniki.iphone",
+      "bundle_ids": [
+        "ru.odnoklassniki.iphone"
+      ],
+      "adam_id": 398465290,
+      "category": "Социальные сети",
+      "description": "Социальная сеть Одноклассники"
+    },
+    {
+      "name": "Почта России",
+      "bundle_id": "ru.russianpost.Russian-Post",
+      "bundle_ids": [
+        "ru.russianpost.Russian-Post"
+      ],
+      "adam_id": 490053907,
+      "category": "Доставка и еда",
+      "description": "Отслеживание посылок и услуги Почты России"
+    },
+    {
+      "name": "Аэрофлот",
+      "bundle_id": "ru.aeroflot.afl",
+      "bundle_ids": [
+        "ru.aeroflot.afl"
+      ],
+      "adam_id": 397040409,
+      "category": "Путешествия",
+      "description": "Авиабилеты и регистрация Аэрофлот"
+    },
+    {
+      "name": "Лента: доставка продуктов",
+      "bundle_id": "com.icemobile.lenta",
+      "bundle_ids": [
+        "com.icemobile.lenta"
+      ],
+      "adam_id": 1058305886,
+      "category": "Доставка и еда",
+      "description": "Гипермаркет Лента - доставка и скидки"
+    },
+    {
+      "name": "Zenden",
+      "bundle_id": "ru.zenden.ios",
+      "bundle_ids": [
+        "ru.zenden.ios"
+      ],
+      "adam_id": 1475727197,
+      "category": "Покупки и объявления",
+      "description": "Магазин обуви и аксессуаров Zenden"
+    },
+    {
+      "name": "Ягодный Фест",
+      "bundle_id": "com.berries.volfest.berriesVolfest",
+      "bundle_ids": [
+        "com.berries.volfest.berriesVolfest"
+      ],
+      "adam_id": 6475730768,
+      "category": "Покупки и объявления",
+      "description": "Клиент маркетплейса Wildberries"
+    }
+  ]
+}
