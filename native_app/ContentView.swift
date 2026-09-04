@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
+import QuartzCore
 
 // MARK: - Models
 struct SavedIPA: Identifiable, Hashable {
@@ -17,24 +18,35 @@ struct SavedIPA: Identifiable, Hashable {
 
 // MARK: - App Logo View (Blue gradient rounded squircle with white lightning bolt)
 struct AppLogoView: View {
-    var size: CGFloat = 30
-    var cornerRadius: CGFloat = 8
+    var size: CGFloat = 40
+    var cornerRadius: CGFloat = 11
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [Color.blue, Color.cyan],
+                        colors: [Color(red: 79/255, green: 180/255, blue: 255/255), Color(red: 26/255, green: 124/255, blue: 255/255)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
                 .frame(width: size, height: size)
-                .shadow(color: Color.blue.opacity(0.35), radius: size * 0.15, x: 0, y: 1)
+                .shadow(color: Color.blue.opacity(0.4), radius: size * 0.2, x: 0, y: 2)
 
-            Image(systemName: "bolt.horizontal.fill")
-                .font(.system(size: size * 0.46, weight: .bold))
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.45), Color.white.opacity(0.08)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
+                .frame(width: size, height: size)
+
+            Image(systemName: "bolt.fill")
+                .font(.system(size: size * 0.48, weight: .bold))
                 .foregroundColor(.white)
         }
     }
@@ -56,7 +68,7 @@ extension View {
 struct MatteButtonStyle: ButtonStyle {
     var isProminent: Bool = false
     var tintColor: Color = .blue
-    var cornerRadius: CGFloat = 8
+    var cornerRadius: CGFloat = 12
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -86,7 +98,7 @@ struct MatteButtonStyle: ButtonStyle {
 
 extension View {
     @ViewBuilder
-    func matteButton(isProminent: Bool = false, tint: Color = .blue, cornerRadius: CGFloat = 8) -> some View {
+    func matteButton(isProminent: Bool = false, tint: Color = .blue, cornerRadius: CGFloat = 12) -> some View {
         self.buttonStyle(MatteButtonStyle(isProminent: isProminent, tintColor: tint, cornerRadius: cornerRadius))
     }
 }
@@ -138,11 +150,21 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .device:    return "iphone.and.arrow.forward"
+        case .device:    return "iphone.gen3"
         case .purchases: return "bag.fill"
-        case .customId:  return "number.circle.fill"
+        case .customId:  return "number"
         case .library:   return "archivebox.fill"
         case .settings:  return "gearshape.fill"
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .device:    return Color(red: 52/255, green: 199/255, blue: 89/255) // Apple Green
+        case .purchases: return Color(red: 0/255, green: 122/255, blue: 255/255) // Apple Blue
+        case .customId:  return Color(red: 255/255, green: 149/255, blue: 0/255) // Apple Orange
+        case .library:   return Color(red: 175/255, green: 82/255, blue: 222/255) // Apple Purple
+        case .settings:  return Color(red: 142/255, green: 142/255, blue: 147/255) // Apple Gray
         }
     }
 }
@@ -185,7 +207,11 @@ struct ContentView: View {
     @AppStorage("autoCheckUpdates")        private var autoCheckUpdates: Bool = true
 
     var currentEngineMode: InstallEngineMode {
-        InstallEngineMode(rawValue: installEngineMode) ?? .direct
+        let mode = InstallEngineMode(rawValue: installEngineMode) ?? .direct
+        if mode == .configurator && !engine.isConfiguratorInstalled {
+            return .direct
+        }
+        return mode
     }
 
     var selectedSidebar: SidebarItem {
@@ -300,27 +326,55 @@ struct ContentView: View {
     // MARK: - Main Body
     var body: some View {
         ZStack {
-            // Subtle Liquid Glass Background for window
-            VisualEffectBlur(material: .sidebar, blendingMode: .behindWindow)
-                .ignoresSafeArea()
-
-            NavigationSplitView {
-                sidebarNavigationView
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 280)
-            } detail: {
-                ZStack {
-                    detailContentView
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.windowBackgroundColor).opacity(0.5).background(.ultraThinMaterial))
-                .ignoresSafeArea(.container, edges: .top)
+            // Frosted Glass Window Canvas (Tahoe Matte Translucent Canvas)
+            ZStack {
+                VisualEffectBlur(material: .underWindowBackground, blendingMode: .behindWindow)
+                Theme.Colors.windowFrostedTint(for: colorScheme)
             }
+            .ignoresSafeArea()
+
+            WindowConfigurator()
+                .frame(width: 0, height: 0)
+
+            HStack(spacing: Theme.Metrics.panelSpacing) {
+                // Left Floating Sidebar Card (300px width, 26px continuous rounded squircle)
+                sidebarNavigationView
+                    .frame(width: Theme.Metrics.sidebarWidth)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Metrics.radiusPanel, style: .continuous)
+                            .fill(Theme.Colors.sidebarBackground(for: colorScheme))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Metrics.radiusPanel, style: .continuous)
+                            .stroke(Theme.Colors.sidebarBorder(for: colorScheme), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.radiusPanel, style: .continuous))
+                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 10, x: 0, y: 3)
+
+                // Right Floating Canvas Card (flex-1, 26px continuous rounded squircle)
+                detailContentView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Metrics.radiusPanel, style: .continuous)
+                            .fill(Theme.Colors.canvasBackground(for: colorScheme))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Metrics.radiusPanel, style: .continuous)
+                            .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.radiusPanel, style: .continuous))
+                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 10, x: 0, y: 3)
+            }
+            .padding(Theme.Metrics.windowPadding)
+            .ignoresSafeArea(.all, edges: .top)
 
             if engine.isMandatoryUpdateInProgress {
                 mandatoryUpdateOverlay
                     .transition(.opacity)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.radiusWindow, style: .continuous))
+        .ignoresSafeArea()
         .frame(minWidth: 940, minHeight: 620)
         .preferredColorScheme(preferredScheme)
         .onAppear {
@@ -336,7 +390,7 @@ struct ContentView: View {
         .sheet(isPresented: $isRestoring)              { restoreProgressSheet }
         .sheet(isPresented: $showManualAdamIdDialog)    { manualAdamIdSheet }
         .sheet(isPresented: $showDeviceManagerSheet)    { deviceManagerSheet }
-                .sheet(isPresented: $showAppleIdSheet)          { appleIdSheet }
+        .sheet(isPresented: $showAppleIdSheet)          { appleIdSheet }
         .alert(isPresented: $showAlert) {
             Alert(title: Text("Open Store"), message: Text(alertMessage ?? ""),
                   dismissButton: .default(Text("OK")))
@@ -376,26 +430,27 @@ struct ContentView: View {
     // MARK: - Sidebar Navigation View (Fully interactive, reliable clicks)
     private var sidebarNavigationView: some View {
         VStack(spacing: 0) {
-            // App Title & Badge
-            HStack(spacing: Theme.Metrics.padding8) {
-                AppLogoView(size: 30, cornerRadius: Theme.Metrics.radiusIcon)
+            // Brand (Top area with traffic light inset)
+            HStack(spacing: 12) {
+                AppLogoView(size: 40, cornerRadius: 11)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Open Store")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                     Text("iOS App Manager")
-                        .themeAux()
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                 }
 
                 Spacer()
             }
-            .padding(.horizontal, Theme.Metrics.padding16)
-            .padding(.top, 32)
-            .padding(.bottom, Theme.Metrics.padding12)
+            .padding(.horizontal, 16)
+            .padding(.top, 48)
+            .padding(.bottom, 14)
 
             // Account & Device Glass Cards
-            VStack(spacing: Theme.Metrics.padding8) {
+            VStack(spacing: 8) {
                 // Apple ID Button Card
                 Button(action: {
                     if currentEngineMode == .configurator {
@@ -404,163 +459,191 @@ struct ContentView: View {
                         showAppleIdSheet = true
                     }
                 }) {
-                    HStack(spacing: Theme.Metrics.padding8) {
+                    HStack(spacing: 8) {
                         ZStack {
                             Circle()
-                                .fill((currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) || (currentEngineMode == .direct && engine.isAppleIdAuthenticated) ? Theme.Colors.blue.opacity(0.15) : Color.secondary.opacity(0.12))
-                                .frame(width: 28, height: 28)
+                                .fill((currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) || (currentEngineMode == .direct && engine.isAppleIdAuthenticated) ? Theme.Colors.blueTint(for: colorScheme) : Color.primary.opacity(0.06))
+                                .frame(width: 32, height: 32)
                             Image(systemName: engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? "person.crop.circle.fill" : "person.crop.circle")
-                                .font(.system(size: 16))
-                                .foregroundColor(engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? Theme.Colors.blue : .secondary)
+                                .font(.system(size: 18))
+                                .foregroundColor(engine.isAppleIdAuthenticated || (currentEngineMode == .configurator && !engine.currentAccountDsid.isEmpty) ? Theme.Colors.blue : Theme.Colors.textTertiary(for: colorScheme))
                         }
 
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 1.5) {
                             Text(currentEngineMode == .configurator ? "Apple Configurator Auth" : (engine.activeAppleIdEmail.isEmpty ? "Apple ID — Войти" : engine.activeAppleIdEmail))
-                                .font(Theme.Typography.aux.weight(.semibold))
-                                .foregroundColor(.primary)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                                 .lineLimit(1)
-                            Text(currentEngineMode == .configurator ? (!engine.currentAccountDsid.isEmpty ? "\(engine.purchasedApps.count) покупок • Configurator" : "Нажмите, чтобы открыть") : (engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."))" : (engine.isAppleIdAuthenticated && engine.purchasedApps.isEmpty ? "Загрузка покупок..." : (engine.currentAccountDsid.isEmpty && !engine.isAppleIdAuthenticated ? "Нажмите для настроек" : "\(engine.purchasedApps.count) покупок • FairPlay"))))
-                                .font(.system(size: 9))
-                                .foregroundColor(.secondary)
+                            Text(currentEngineMode == .configurator ? (!engine.currentAccountDsid.isEmpty ? "\(engine.purchasedApps.count) покупок • Configurator" : "Нажмите, чтобы открыть") : (engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."))" : (engine.isAppleIdAuthenticated && engine.purchasedApps.isEmpty ? "Загрузка покупок..." : (engine.currentAccountDsid.isEmpty && !engine.isAppleIdAuthenticated ? "Нажмите для входа" : "\(engine.purchasedApps.count) покупок • FairPlay"))))
+                                .font(.system(size: 10.5))
+                                .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                                .lineLimit(1)
                         }
+                        .layoutPriority(1)
 
-                        Spacer()
+                        Spacer(minLength: 4)
 
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
                     }
-                    .padding(.horizontal, Theme.Metrics.padding12)
-                    .padding(.vertical, Theme.Metrics.padding8)
-                    .themeCardBackground(scheme: colorScheme)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Theme.Colors.cardBackground(for: colorScheme))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
 
-                // Device Button Card (iMazing-style Interactive Header)
+                // Device Button Card
                 let activeDev = engine.activeDevice
                 Button(action: {
                     selectedDeviceForDetail = activeDev
                     showDeviceManagerSheet = true
                 }) {
-                    HStack(spacing: Theme.Metrics.padding8) {
+                    HStack(spacing: 8) {
                         ZStack {
                             Circle()
-                                .fill(activeDev != nil ? (activeDev?.connectionType == .usb ? Theme.Colors.green.opacity(0.15) : (activeDev?.connectionType == .wifi ? Theme.Colors.blue.opacity(0.15) : Color.secondary.opacity(0.12))) : Color.secondary.opacity(0.12))
-                                .frame(width: 28, height: 28)
-                            Image(systemName: activeDev?.connectionType.icon ?? "cable.connector")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(activeDev != nil ? (activeDev?.connectionType == .usb ? Theme.Colors.green : (activeDev?.connectionType == .wifi ? Theme.Colors.blue : .secondary)) : .secondary)
+                                .fill(activeDev != nil ? Color.blue.opacity(0.18) : Color.primary.opacity(0.06))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: activeDev?.connectionType == .usb ? "cable.connector" : "wifi")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(activeDev != nil ? Theme.Colors.blue : Theme.Colors.textTertiary(for: colorScheme))
                         }
 
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 1.5) {
                             if let dev = activeDev {
                                 Text(dev.formattedDisplayName)
-                                    .font(Theme.Typography.aux.weight(.semibold))
-                                    .foregroundColor(.primary)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                                     .lineLimit(1)
                                 Text("\(dev.modelIdentifier) • \(dev.iosVersion)")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 10.5))
+                                    .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                                     .lineLimit(1)
                             } else {
                                 Text("iPhone не подключен")
-                                    .font(Theme.Typography.aux.weight(.semibold))
-                                    .foregroundColor(.primary)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+                                    .lineLimit(1)
                                 Text("Подключите кабель или Wi-Fi")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 10.5))
+                                    .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                                    .lineLimit(1)
                             }
                         }
+                        .layoutPriority(1)
 
-                        Spacer()
+                        Spacer(minLength: 4)
 
                         if let dev = activeDev {
-                            Text(dev.isOnline ? dev.connectionType.rawValue : "Офлайн")
-                                .font(.system(size: 8, weight: .bold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(dev.isOnline ? (dev.connectionType == .usb ? Theme.Colors.green.opacity(0.15) : Theme.Colors.blue.opacity(0.15)) : Color.secondary.opacity(0.15))
-                                .foregroundColor(dev.isOnline ? (dev.connectionType == .usb ? Theme.Colors.green : Theme.Colors.blue) : .secondary)
+                            Text(dev.connectionType == .usb ? "USB" : "Wi-Fi")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2.5)
+                                .background(Theme.Colors.blueTint(for: colorScheme))
+                                .foregroundColor(Theme.Colors.blue)
                                 .clipShape(Capsule())
                         } else {
                             Circle()
-                                .fill(Color.secondary.opacity(0.4))
+                                .fill(Theme.Colors.textTertiary(for: colorScheme))
                                 .frame(width: 6, height: 6)
                         }
                     }
-                    .padding(.horizontal, Theme.Metrics.padding12)
-                    .padding(.vertical, Theme.Metrics.padding8)
-                    .themeCardBackground(scheme: colorScheme)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(activeDev != nil ? Theme.Colors.blueTint(for: colorScheme) : Theme.Colors.cardBackground(for: colorScheme))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(activeDev != nil ? Theme.Colors.blue.opacity(0.35) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 .help("Нажмите для открытия Менеджера устройств")
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.bottom, 12)
 
             // Section divider
             Rectangle()
-                .fill(Color.primary.opacity(0.06))
+                .fill(Theme.Colors.separator(for: colorScheme))
                 .frame(height: 1)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
 
             // Scrollable Navigation List
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Theme.Metrics.padding16) {
+                VStack(alignment: .leading, spacing: 14) {
                     // Sources Section
-                    VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Источники")
-                            .themeSectionHeader()
-                            .padding(.horizontal, Theme.Metrics.padding16)
-                            .padding(.bottom, 2)
+                            .font(.system(size: 10.5, weight: .bold))
+                            .textCase(.uppercase)
+                            .kerning(0.6)
+                            .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 4)
 
                         sidebarNavButton(item: .device)
                         sidebarNavButton(item: .purchases)
                     }
 
                     // Tools Section
-                    VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Инструменты")
-                            .themeSectionHeader()
-                            .padding(.horizontal, Theme.Metrics.padding16)
-                            .padding(.bottom, 2)
+                            .font(.system(size: 10.5, weight: .bold))
+                            .textCase(.uppercase)
+                            .kerning(0.6)
+                            .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 4)
 
                         sidebarNavButton(item: .customId)
                         sidebarNavButton(item: .library)
                     }
 
                     // System Section
-                    VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Система")
-                            .themeSectionHeader()
-                            .padding(.horizontal, Theme.Metrics.padding16)
-                            .padding(.bottom, 2)
+                            .font(.system(size: 10.5, weight: .bold))
+                            .textCase(.uppercase)
+                            .kerning(0.6)
+                            .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 4)
 
                         sidebarNavButton(item: .settings)
                     }
                 }
-                .padding(.vertical, Theme.Metrics.padding8)
+                .padding(.vertical, 4)
             }
 
             Spacer()
 
             // Mode switch footer
             Rectangle()
-                .fill(Color.primary.opacity(0.06))
+                .fill(Theme.Colors.separator(for: colorScheme))
                 .frame(height: 1)
-                .padding(.horizontal, Theme.Metrics.padding12)
+                .padding(.horizontal, 16)
 
-            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
-                HStack(spacing: Theme.Metrics.padding8) {
-                    Image(systemName: currentEngineMode == .direct ? "bolt.fill" : "gearshape.2.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(currentEngineMode == .direct ? Theme.Colors.blue : Theme.Colors.amber)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Theme.Colors.blue)
                         .frame(width: 18)
 
-                    Text(currentEngineMode == .direct ? "Прямой нативный" : "Apple Configurator")
-                        .font(Theme.Typography.aux.weight(.semibold))
-                        .foregroundColor(.primary)
+                    Text("Прямой нативный")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
 
                     Spacer()
 
@@ -574,18 +657,21 @@ struct ContentView: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
+                    .disabled(!engine.isConfiguratorInstalled)
+                    .help(engine.isConfiguratorInstalled ? "" : "Требуется установка Apple Configurator")
                 }
 
-                Text(currentEngineMode == .direct ? "Быстрая установка без Configurator" : "Резервный режим через GUI")
-                    .themeAux()
+                Text("Быстрая установка без Configurator")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                     .lineLimit(1)
             }
-            .padding(.horizontal, Theme.Metrics.padding16)
-            .padding(.vertical, Theme.Metrics.padding12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 
-    // Interactive Sidebar Button
+    // Interactive Sidebar Button (macOS System Settings squircle badge style)
     private func sidebarNavButton(item: SidebarItem) -> some View {
         let isSelected = selectedSidebar == item
         let count = sidebarCount(item)
@@ -598,16 +684,35 @@ struct ContentView: View {
             }
         }) {
             HStack(spacing: 10) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 13, weight: isSelected ? .bold : .regular))
-                    .foregroundColor(isSelected ? .white : .blue)
-                    .frame(width: 18)
+                // Colored squircle icon badge (22x22, radius 6 continuous)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [item.badgeColor.opacity(0.88), item.badgeColor],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 22, height: 22)
+                        .shadow(color: item.badgeColor.opacity(0.3), radius: 2, x: 0, y: 1)
+
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
+                        .frame(width: 22, height: 22)
+
+                    Image(systemName: item.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                }
 
                 Text(item.rawValue)
-                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                    .foregroundColor(isSelected ? .white : .primary)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(isSelected ? .white : Theme.Colors.textPrimary(for: colorScheme))
+                    .lineLimit(1)
+                    .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 if item == .settings && engine.latestUpdateInfo?.isNewer == true {
                     Text("NEW")
@@ -621,20 +726,38 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(isSelected ? Color.white.opacity(0.25) : Color.primary.opacity(0.06))
-                        .foregroundColor(isSelected ? .white : .secondary)
+                        .background(isSelected ? Color.white.opacity(0.22) : Color.primary.opacity(0.08))
+                        .foregroundColor(isSelected ? .white : Theme.Colors.textSecondary(for: colorScheme))
                         .clipShape(Capsule())
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
             .contentShape(Rectangle())
             .background(
                 Group {
                     if isSelected {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.blue)
-                            .shadow(color: Color.blue.opacity(0.25), radius: 3, x: 0, y: 1)
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color(red: 0/255, green: 122/255, blue: 255/255), Color(red: 0/255, green: 105/255, blue: 225/255)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .shadow(color: Color.blue.opacity(0.32), radius: 4, x: 0, y: 1.5)
+
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.35), Color.white.opacity(0.05)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 0.5
+                                )
+                        }
                     } else {
                         Color.clear
                     }
@@ -673,81 +796,224 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Matte Translucent Header Container
-    @ViewBuilder
-    private func frostedGlassHeader<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity)
-            .background(
-                ZStack {
-                    // 1. Native macOS blur
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
+// MARK: - Tahoe Liquid Glass Backdrop Blur (Adjustable Radius)
+struct BackdropBlurView: NSViewRepresentable {
+    var radius: CGFloat = 6.0
 
-                    // 2. Monotone translucent matte tint
-                    Color(NSColor.windowBackgroundColor).opacity(0.85)
-                }
-            )
-            .overlay(
-                // 3. Clean hairline separator
-                Rectangle()
-                    .fill(Color(NSColor.separatorColor).opacity(0.3))
-                    .frame(height: 1),
-                alignment: .bottom
-            )
-            .zIndex(100)
+    func makeNSView(context: Context) -> NSView {
+        let view = CustomBlurView()
+        view.radius = radius
+        return view
     }
 
-    // MARK: - Header Panel Helper
-    private func detailHeaderBar<L: View>(@ViewBuilder leftContent: () -> L, searchQuery: Binding<String>, placeholder: String) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            leftContent()
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let v = nsView as? CustomBlurView {
+            v.radius = radius
+        }
+    }
 
-            Spacer(minLength: 16)
+    private class CustomBlurView: NSView {
+        var radius: CGFloat = 6.0 {
+            didSet { updateFilter() }
+        }
 
-            // Clean Matte Search Panel
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                    .font(.system(size: 12, weight: .medium))
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+        }
+        required init?(coder: NSCoder) { fatalError() }
 
-                TextField(placeholder, text: searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .frame(minWidth: 160, maxWidth: 260)
+        override func makeBackingLayer() -> CALayer {
+            if let backdropClass = NSClassFromString("CABackdropLayer") as? CALayer.Type {
+                return backdropClass.init()
+            }
+            return CALayer()
+        }
 
-                if !searchQuery.wrappedValue.isEmpty {
-                    Button(action: { searchQuery.wrappedValue = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            updateFilter()
+        }
+
+        private func updateFilter() {
+            guard let layer = self.layer else { return }
+            if let filterClass = NSClassFromString("CAFilter") as? NSObject.Type {
+                let sel = NSSelectorFromString("filterWithType:")
+                if let filter = filterClass.perform(sel, with: "gaussianBlur")?.takeUnretainedValue() as? NSObject {
+                    filter.setValue(radius, forKey: "inputRadius")
+                    filter.setValue(true, forKey: "inputNormalizeEdges")
+                    layer.filters = [filter]
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+        }
+    }
+}
+
+    // MARK: - Minimalistic Seamless Toolbar Header
+    @ViewBuilder
+    private func frostedGlassHeader<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+                .frame(maxWidth: .infinity)
+
+            // Soft, subtle hairline divider (0.5pt with gentle opacity)
+            Rectangle()
+                .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.35))
+                .frame(height: 0.5)
+        }
+        .background(
+            ZStack {
+                BackdropBlurView(radius: 6.0)
+                Theme.Colors.canvasBackground(for: colorScheme)
+                    .opacity(colorScheme == .dark ? 0.15 : 0.20)
+            }
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.12 : 0.03), radius: 5, x: 0, y: 2)
+        .zIndex(100)
+    }
+
+    // MARK: - Liquid Glass Modal Sheet Container
+    @ViewBuilder
+    private func liquidGlassSheet<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                ZStack {
+                    BackdropBlurView(radius: 8.0)
+                    (colorScheme == .dark
+                        ? Color(red: 28/255, green: 28/255, blue: 34/255)
+                        : Color(red: 248/255, green: 248/255, blue: 252/255))
+                        .opacity(colorScheme == .dark ? 0.72 : 0.82)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.radiusSheet, style: .continuous))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                RoundedRectangle(cornerRadius: Theme.Metrics.radiusSheet, style: .continuous)
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.45), lineWidth: 0.5)
             )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), radius: 24, x: 0, y: 10)
+    }
+
+    // MARK: - Modern macOS Detail Navigation Bar (Tahoe Liquid Glass)
+    private func pageHeaderContent<Right: View>(
+        title: String,
+        subtitle: String = "",
+        @ViewBuilder rightContent: () -> Right
+    ) -> some View {
+        HStack(alignment: .center, spacing: 14) {
+            // macOS Navigation Chevrons (< >) Capsule
+            HStack(spacing: 0) {
+                Button(action: {}) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Theme.Colors.textTertiary(for: colorScheme).opacity(0.55))
+                        .frame(width: 24, height: 26)
+                }
+                .buttonStyle(.plain)
+                .disabled(true)
+
+                Button(action: {}) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Theme.Colors.textTertiary(for: colorScheme).opacity(0.55))
+                        .frame(width: 24, height: 26)
+                }
+                .buttonStyle(.plain)
+                .disabled(true)
+            }
+            .padding(.horizontal, 2)
+            .frame(height: 30)
+            .background(
+                Capsule()
+                    .fill(Theme.Colors.controlBackground(for: colorScheme))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1)
+            )
+
+            // Page Title & Subtitle
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 17, weight: .bold))
+                    .tracking(-0.25)
+                    .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: 320, alignment: .leading)
+
+            Spacer(minLength: 12)
+
+            rightContent()
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, (engine.isVpnActive && !vpnNoticeDismissed) ? 8 : 14)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 20)
+        .padding(.top, (engine.isVpnActive && !vpnNoticeDismissed) ? 8 : 16)
+        .padding(.bottom, 12)
+        .frame(height: 64)
         .frame(maxWidth: .infinity)
+    }
+
+    private func pageHeaderBar<Right: View>(
+        title: String,
+        subtitle: String = "",
+        @ViewBuilder rightContent: () -> Right
+    ) -> some View {
+        frostedGlassHeader {
+            pageHeaderContent(title: title, subtitle: subtitle, rightContent: rightContent)
+        }
+    }
+
+    // MARK: - Minimalistic macOS Search Capsule
+    private func searchField(query: Binding<String>, placeholder: String, width: CGFloat = 220) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                .font(.system(size: 12, weight: .medium))
+
+            TextField(placeholder, text: query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+
+            if !query.wrappedValue.isEmpty {
+                Button(action: { query.wrappedValue = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(width: width, height: 30)
+        .background(
+            Capsule()
+                .fill(Theme.Colors.controlBackground(for: colorScheme))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1)
+        )
     }
 
     // MARK: - 0. Old Device Apps View
     private var oldDeviceHeader: some View {
-        frostedGlassHeader {
+        let appsWithId = engine.oldDeviceApps.filter { $0.adamId != nil && $0.adamId! > 0 }
+        return frostedGlassHeader {
             VStack(spacing: 0) {
-                detailHeaderBar(
-                    leftContent: {
+                pageHeaderContent(
+                    title: "Приложения с iPhone",
+                    subtitle: engine.activeDevice != nil ? "\(engine.activeDevice!.formattedDisplayName) • \(filteredOldDeviceApps.count) приложений" : "\(filteredOldDeviceApps.count) приложений"
+                ) {
+                    HStack(spacing: 10) {
+                        searchField(query: $searchQuery, placeholder: "Поиск приложений...", width: 220)
+
                         Button(action: {
                             engine.scanInstalledAppsFromDevice(catalog: catalogApps)
                         }) {
@@ -761,17 +1027,17 @@ struct ContentView: View {
                                 Text("Обновить")
                             }
                         }
-                        .matteButton(isProminent: false, cornerRadius: 8)
+                        .liquidGlass(variant: .glass, size: .md)
                         .disabled(engine.isScanningApps)
-                    },
-                    searchQuery: $searchQuery,
-                    placeholder: "Поиск среди \(engine.oldDeviceApps.count) приложений..."
-                )
+                    }
+                }
 
-                // Batch selection bar integrated into matte header
-                let appsWithId = engine.oldDeviceApps.filter { $0.adamId != nil && $0.adamId! > 0 }
+                // Batch selection bar integrated seamlessly into frosted glass header
                 if !appsWithId.isEmpty {
-                    Divider().opacity(0.12)
+                    Rectangle()
+                        .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.18))
+                        .frame(height: 0.5)
+
                     HStack(spacing: 10) {
                         Button(selectedAdamIds.count == appsWithId.count ? "Снять выбор" : "Выбрать все (\(appsWithId.count))") {
                             if selectedAdamIds.count == appsWithId.count {
@@ -780,23 +1046,29 @@ struct ContentView: View {
                                 selectedAdamIds = Set(appsWithId.compactMap { $0.adamId })
                             }
                         }
-                        .matteButton(isProminent: false, cornerRadius: 8)
+                        .liquidGlass(variant: .glass, size: .sm)
 
                         if !selectedAdamIds.isEmpty {
                             Text("Выбрано: \(selectedAdamIds.count)")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.blue)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(Theme.Colors.blue)
 
                             Button(action: { startBatchDownload(installToDevice: false) }) {
-                                Label("Скачать (\(selectedAdamIds.count))", systemImage: "arrow.down.circle")
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.down.circle")
+                                    Text("Скачать (\(selectedAdamIds.count))")
+                                }
                             }
-                            .matteButton(isProminent: false, cornerRadius: 8)
+                            .liquidGlass(variant: .glass, size: .sm)
                             .disabled(isBatchDownloading)
 
                             Button(action: { startBatchDownload(installToDevice: true) }) {
-                                Label("Установить (\(selectedAdamIds.count))", systemImage: "arrow.down.to.line.circle.fill")
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.down.to.line.circle.fill")
+                                    Text("Установить (\(selectedAdamIds.count))")
+                                }
                             }
-                            .matteButton(isProminent: true, tint: .blue, cornerRadius: 8)
+                            .liquidGlass(variant: .primary, size: .sm)
                             .disabled(isBatchDownloading)
                         }
 
@@ -811,7 +1083,7 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 20)
                     .padding(.vertical, 7)
                 }
             }
@@ -829,15 +1101,14 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 7) {
+                    LazyVStack(spacing: 8) {
                         ForEach(filteredOldDeviceApps) { app in
                             deviceAppRow(app: app)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
                 }
-                .clipped()
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -849,7 +1120,7 @@ struct ContentView: View {
         let isSelected = app.adamId != nil && selectedAdamIds.contains(app.adamId!)
         let savedIPA = isSavedInLibrary(adamId: app.adamId ?? 0, name: app.name, bundleId: app.bundleId)
 
-        return HStack(spacing: Theme.Metrics.padding12) {
+        return HStack(spacing: 12) {
             // Checkbox
             if let aid = app.adamId, aid > 0 {
                 Button(action: {
@@ -857,134 +1128,131 @@ struct ContentView: View {
                     else { selectedAdamIds.insert(aid) }
                 }) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 15))
-                        .foregroundColor(isSelected ? Theme.Colors.blue : Color.secondary.opacity(0.5))
+                        .font(.system(size: 16))
+                        .foregroundColor(isSelected ? Theme.Colors.blue : Theme.Colors.textTertiary(for: colorScheme))
                 }
                 .buttonStyle(.plain)
             } else {
                 Image(systemName: "circle.dashed")
-                    .font(.system(size: 15))
-                    .foregroundColor(Color.secondary.opacity(0.3))
+                    .font(.system(size: 16))
+                    .foregroundColor(Theme.Colors.textTertiary(for: colorScheme).opacity(0.4))
             }
 
             // App Icon
             appIconView(url: app.artworkUrl, name: app.name)
 
             // Details
-            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
-                HStack(spacing: Theme.Metrics.padding8) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
                     Text(app.displayName.isEmpty ? app.name : app.displayName)
-                        .themeCardTitle()
-                        .lineLimit(2)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+                        .lineLimit(1)
 
                     if !app.bundleVersion.isEmpty {
                         Text(app.bundleVersion)
-                            .font(.system(size: 9, weight: .medium))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.primary.opacity(0.05))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.06))
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                             .clipShape(Capsule())
                     }
                 }
 
-                HStack(spacing: Theme.Metrics.padding4) {
+                HStack(spacing: 6) {
                     Text(app.bundleId)
-                        .themeSubtitle()
-                        .font(.system(size: 11, design: .monospaced)) // Override size/design for bundleId
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                         .lineLimit(1)
 
                     if let aid = app.adamId, aid > 0 {
-                        Text("•").foregroundColor(.secondary)
+                        Text("•").foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
                         Text("ID: \(String(aid))")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundColor(Theme.Colors.blue)
                     }
 
                     if savedIPA != nil {
-                        Text("•").foregroundColor(.secondary)
-                        HStack(spacing: 2) {
+                        Text("•").foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                        HStack(spacing: 3) {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                             Text("В библиотеке")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 10, weight: .bold))
                         }
                         .foregroundColor(Theme.Colors.green)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Theme.Colors.green.opacity(0.12))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.Colors.greenTint(for: colorScheme))
                         .clipShape(Capsule())
                     }
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             // Actions
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 if let aid = app.adamId, aid > 0 {
                     if let saved = savedIPA {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
                         }) {
-                            Label("Скачать", systemImage: "arrow.clockwise")
-                                .font(.system(size: 11, weight: .medium))
-                                .frame(width: 76, height: 26)
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("Скачать")
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
-                        .controlSize(.small)
+                        .liquidGlass(variant: .glass, size: .sm)
                         .help("Скачать IPA заново")
 
                         Button(action: {
                             startInstallFlow(ipaPath: saved.path, name: app.displayName)
                         }) {
-                            Label("Установить", systemImage: "checkmark.circle.fill")
-                                .font(.system(size: 11, weight: .bold))
-                                .frame(width: 136, height: 26)
+                            HStack(spacing: 5) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Установить")
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .roundedCapsuleButton()
-                        .tint(.green)
-                        .controlSize(.small)
+                        .liquidGlass(variant: .green, size: .sm)
                     } else {
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: false)
                         }) {
-                            Label("Скачать", systemImage: "arrow.down.circle")
-                                .font(.system(size: 11, weight: .medium))
-                                .frame(width: 76, height: 26)
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.down.circle")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("Скачать")
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .roundedCapsuleButton()
-                        .controlSize(.small)
+                        .liquidGlass(variant: .glass, size: .sm)
                         .help("Скачать IPA в Библиотеку")
 
                         Button(action: {
                             startRestoreFlow(adamId: aid, name: app.name, installToDevice: true)
                         }) {
-                            Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
-                                .font(.system(size: 10, weight: .bold))
-                                .frame(width: 136, height: 26)
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.down.to.line.circle.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Скачать и установить")
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .roundedCapsuleButton()
-                        .tint(.blue)
-                        .controlSize(.small)
+                        .liquidGlass(variant: .primary, size: .sm)
                         .help("Скачать и установить на iPhone")
                     }
                 } else {
-                    Button("Указать ID") {
+                    Button(action: {
                         manualBundleId = app.bundleId
                         manualAppName = app.name
                         manualEnteredId = ""
                         showManualAdamIdDialog = true
+                    }) {
+                        Text("Указать ID")
                     }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-                    .foregroundColor(.orange)
-                    .frame(width: 218, height: 26)
+                    .liquidGlass(variant: .orange, size: .sm)
                 }
 
                 Button(action: {
@@ -997,53 +1265,55 @@ struct ContentView: View {
                     }
                 }) {
                     Image(systemName: "trash")
-                        .font(.system(size: 11))
-                        .foregroundColor(.red.opacity(0.75))
-                        .frame(width: 20, height: 26)
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.red)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.primary.opacity(0.04)))
                 }
                 .buttonStyle(.plain)
-                .help("Удалить IPA из библиотеки (без удаления с iPhone)")
             }
-            .frame(width: 250, alignment: .trailing)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Color.blue.opacity(0.08) : Color.primary.opacity(0.035))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isSelected ? Theme.Colors.blueTint(for: colorScheme) : Theme.Colors.cardBackground(for: colorScheme))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(isSelected ? Theme.Colors.blue.opacity(0.4) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
         )
     }
 
     // MARK: - 2. Purchased Apps View
     private var purchasedAppsHeader: some View {
-        frostedGlassHeader {
-            detailHeaderBar(
-                leftContent: {
-                    Button(action: {
-                        engine.refreshPurchasedApps()
-                        engine.refreshAppleIdStatus()
-                    }) {
-                        HStack(spacing: 5) {
-                            if engine.isLoadingPurchasedApps {
-                                ProgressView().controlSize(.small).scaleEffect(0.7)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 11, weight: .semibold))
-                            }
-                            let countStr = engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."
-                            Text(engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(countStr))" : "Синхронизировать")
+        pageHeaderBar(
+            title: "Покупки Apple ID",
+            subtitle: engine.isAppleIdAuthenticated ? "\(engine.activeAppleIdEmail) • \(engine.purchasedApps.count) покупок" : "Войдите в Apple ID для синхронизации"
+        ) {
+            HStack(spacing: 10) {
+                searchField(query: $searchQuery, placeholder: "Поиск в покупках...", width: 220)
+
+                Button(action: {
+                    engine.refreshPurchasedApps()
+                    engine.refreshAppleIdStatus()
+                }) {
+                    HStack(spacing: 5) {
+                        if engine.isLoadingPurchasedApps {
+                            ProgressView().controlSize(.small).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .semibold))
                         }
+                        let countStr = engine.totalPurchasedAppsCount > 0 ? "\(engine.totalPurchasedAppsCount)" : "..."
+                        Text(engine.isLoadingPurchasedApps ? "Загрузка (\(engine.purchasedApps.count)/\(countStr))" : "Синхронизировать")
                     }
-                    .matteButton(isProminent: false, cornerRadius: 8)
-                    .disabled(engine.isLoadingPurchasedApps)
-                },
-                searchQuery: $searchQuery,
-                placeholder: "Поиск среди \(engine.totalPurchasedAppsCount > 0 ? engine.totalPurchasedAppsCount : engine.purchasedApps.count) покупок..."
-            )
+                }
+                .liquidGlass(variant: .glass, size: .md)
+                .disabled(engine.isLoadingPurchasedApps)
+            }
         }
     }
 
@@ -1058,15 +1328,14 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 7) {
+                    LazyVStack(spacing: 8) {
                         ForEach(filteredPurchasedApps) { item in
                             purchasedAppRow(item: item)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
                 }
-                .clipped()
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -1077,162 +1346,200 @@ struct ContentView: View {
     private func purchasedAppRow(item: PurchasedApp) -> some View {
         let savedIPA = isSavedInLibrary(adamId: item.adamId, name: item.name, bundleId: item.bundleId)
 
-        return HStack(spacing: Theme.Metrics.padding12) {
+        return HStack(spacing: 12) {
             appIconView(url: item.artworkUrl, name: item.name)
 
-            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(item.name)
-                    .themeCardTitle()
-                    .lineLimit(2)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+                    .lineLimit(1)
 
-                HStack(spacing: Theme.Metrics.padding4) {
+                HStack(spacing: 6) {
                     Text(item.bundleId)
-                        .themeSubtitle()
-                        .font(.system(size: 11, design: .monospaced)) // Override size/design for bundleId
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                         .lineLimit(1)
 
-                    Text("•").foregroundColor(.secondary)
+                    Text("•").foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
 
                     Text("ID: \(String(item.adamId))")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundColor(Theme.Colors.blue)
 
                     if let d = item.purchaseDate {
-                        Text("•").foregroundColor(.secondary)
+                        Text("•").foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
                         Text(dateFormatted(d))
-                            .themeSubtitle()
-                            .font(.system(size: 11))
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                     }
 
                     if savedIPA != nil {
-                        Text("•").foregroundColor(.secondary)
-                        HStack(spacing: 2) {
+                        Text("•").foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                        HStack(spacing: 3) {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                             Text("В библиотеке")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 10, weight: .bold))
                         }
                         .foregroundColor(Theme.Colors.green)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Theme.Colors.green.opacity(0.12))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.Colors.greenTint(for: colorScheme))
                         .clipShape(Capsule())
                     }
                 }
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 8)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 if let saved = savedIPA {
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
                     }) {
-                        Label("Скачать", systemImage: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 76, height: 26)
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Скачать")
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
+                    .liquidGlass(variant: .glass, size: .sm)
                     .help("Скачать IPA заново")
 
                     Button(action: {
                         startInstallFlow(ipaPath: saved.path, name: item.name)
                     }) {
-                        Label("Установить", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11, weight: .bold))
-                            .frame(width: 136, height: 26)
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Установить")
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .roundedCapsuleButton()
-                    .tint(.green)
-                    .controlSize(.small)
+                    .liquidGlass(variant: .green, size: .sm)
                 } else {
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: false)
                     }) {
-                        Label("Скачать", systemImage: "arrow.down.circle")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 76, height: 26)
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Скачать")
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
+                    .liquidGlass(variant: .glass, size: .sm)
                     .help("Скачать IPA в Библиотеку")
 
                     Button(action: {
                         startRestoreFlow(adamId: item.adamId, name: item.name, extVersion: item.versionId, installToDevice: true)
                     }) {
-                        Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .frame(width: 136, height: 26)
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.down.to.line.circle.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Скачать и установить")
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .roundedCapsuleButton()
-                    .tint(.blue)
-                    .controlSize(.small)
+                    .liquidGlass(variant: .primary, size: .sm)
                     .help("Скачать и установить на iPhone")
                 }
             }
-            .frame(width: 224, alignment: .trailing)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.035))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Theme.Colors.cardBackground(for: colorScheme))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
         )
     }
 
     // MARK: - 3. Custom ID View
     private var customIdView: some View {
-        VStack {
+        let valid = customAdamId.trimmingCharacters(in: .whitespaces).count >= 6 && Int64(customAdamId.trimmingCharacters(in: .whitespaces)) != nil
+
+        return VStack(spacing: 0) {
+            pageHeaderBar(
+                title: "Установка по Adam ID",
+                subtitle: "Прямая загрузка официального IPA"
+            ) {
+                EmptyView()
+            }
+
             Spacer()
 
-            VStack(spacing: 20) {
-                AppLogoView(size: 56, cornerRadius: 16)
+            VStack(spacing: 24) {
+                // 72x72 Glowing App Logo (Squircle radius 19 continuous)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 19, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(red: 92/255, green: 188/255, blue: 255/255), Color(red: 26/255, green: 124/255, blue: 255/255)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 72, height: 72)
+                        .shadow(color: Color.blue.opacity(0.45), radius: 18, x: 0, y: 6)
 
-                VStack(spacing: 4) {
-                    Text("Восстановление по Adam ID")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                    Text("Введите числовой идентификатор любого приложения из App Store для прямой загрузки официального IPA.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 380)
+                    RoundedRectangle(cornerRadius: 19, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.45), Color.white.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.75
+                        )
+                        .frame(width: 72, height: 72)
+
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundColor(.white)
                 }
 
-                VStack(spacing: 14) {
-                    HStack(spacing: 8) {
+                VStack(spacing: 6) {
+                    Text("Восстановление по Adam ID")
+                        .font(.system(size: 22, weight: .bold))
+                        .tracking(-0.4)
+                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+
+                    Text("Введите числовой идентификатор любого приложения из App Store для прямой загрузки официального IPA.")
+                        .font(.system(size: 13.5))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 440)
+                }
+
+                VStack(spacing: 16) {
+                    HStack(spacing: 10) {
                         Image(systemName: "number")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                            .font(.system(size: 15, weight: .bold))
 
                         TextField("Например: 570510529", text: $customAdamId)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.system(size: 15, weight: .medium, design: .monospaced))
                             .onSubmit {
                                 if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
                                     startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
                                 }
                             }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 16)
+                    .frame(width: 380, height: 44)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.06))
+                        Capsule()
+                            .fill(Theme.Colors.controlBackground(for: colorScheme))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        Capsule()
+                            .stroke(Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1)
                     )
-                    .frame(width: 320)
 
                     HStack(spacing: 12) {
                         Button(action: {
@@ -1240,68 +1547,85 @@ struct ContentView: View {
                                 startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: false)
                             }
                         }) {
-                            Label("Скачать IPA", systemImage: "arrow.down.circle")
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.down.circle")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Скачать IPA")
+                            }
                         }
-                        .matteButton(isProminent: false, cornerRadius: 8)
-                        .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
+                        .liquidGlass(variant: .glass, size: .lg)
+                        .disabled(!valid)
 
                         Button(action: {
                             if let id = Int64(customAdamId.trimmingCharacters(in: .whitespaces)) {
                                 startRestoreFlow(adamId: id, name: "App \(id)", installToDevice: true)
                             }
                         }) {
-                            Label("Скачать и установить", systemImage: "arrow.down.to.line.circle.fill")
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.down.to.line.circle.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                Text("Скачать и установить")
+                            }
                         }
-                        .matteButton(isProminent: true, tint: .blue, cornerRadius: 8)
-                        .disabled(Int64(customAdamId.trimmingCharacters(in: .whitespaces)) == nil)
+                        .liquidGlass(variant: .primary, size: .lg)
+                        .disabled(!valid)
                     }
                 }
             }
-            .padding(28)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 36)
+            .frame(maxWidth: 560)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(Theme.Colors.cardBackground(for: colorScheme))
+                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04), radius: 12, x: 0, y: 4)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
             )
 
             Spacer()
         }
         .frame(maxWidth: .infinity)
-        .padding(30)
     }
 
     // MARK: - 4. Saved IPA Library View
     private var savedIPAsHeader: some View {
         frostedGlassHeader {
             VStack(spacing: 0) {
-                detailHeaderBar(
-                    leftContent: {
-                        HStack(spacing: 8) {
-                            Button(action: { importIpaFile() }) {
-                                Label("Импорт IPA", systemImage: "plus.circle.fill")
-                            }
-                            .matteButton(isProminent: false, cornerRadius: 8)
+                pageHeaderContent(
+                    title: "Библиотека IPA",
+                    subtitle: "\(savedIPAs.count) сохранённых файлов IPA"
+                ) {
+                    HStack(spacing: 10) {
+                        searchField(query: $savedIPASearchQuery, placeholder: "Поиск в библиотеке...", width: 220)
 
-                            Button(action: {
-                                NSWorkspace.shared.open(URL(fileURLWithPath: effectiveLibraryPath))
-                            }) {
-                                Image(systemName: "folder")
-                                    .font(.system(size: 12, weight: .medium))
+                        Button(action: { importIpaFile() }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Импорт IPA")
                             }
-                            .matteButton(isProminent: false, cornerRadius: 8)
-                            .help("Открыть в Finder")
                         }
-                    },
-                    searchQuery: $savedIPASearchQuery,
-                    placeholder: "Поиск среди \(savedIPAs.count) сохраненных IPA..."
-                )
+                        .liquidGlass(variant: .glass, size: .md)
 
-                // Batch selection bar integrated into matte header
+                        Button(action: {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: effectiveLibraryPath))
+                        }) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .liquidGlass(variant: .glass, size: .md)
+                        .help("Открыть в Finder")
+                    }
+                }
+
                 if !savedIPAs.isEmpty {
-                    Divider().opacity(0.12)
+                    Rectangle()
+                        .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.18))
+                        .frame(height: 0.5)
+
                     HStack(spacing: 10) {
                         Button(selectedSavedIPAPaths.count == savedIPAs.count ? "Снять выбор" : "Выбрать все (\(savedIPAs.count))") {
                             if selectedSavedIPAPaths.count == savedIPAs.count {
@@ -1310,17 +1634,20 @@ struct ContentView: View {
                                 selectedSavedIPAPaths = Set(savedIPAs.map { $0.path })
                             }
                         }
-                        .matteButton(isProminent: false, cornerRadius: 8)
+                        .liquidGlass(variant: .glass, size: .sm)
 
                         if !selectedSavedIPAPaths.isEmpty {
                             Text("Выбрано: \(selectedSavedIPAPaths.count)")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.blue)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(Theme.Colors.blue)
 
                             Button(action: { startBatchInstallSavedIPAs() }) {
-                                Label("Установить (\(selectedSavedIPAPaths.count))", systemImage: "arrow.down.to.line.circle.fill")
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.down.to.line.circle.fill")
+                                    Text("Установить (\(selectedSavedIPAPaths.count))")
+                                }
                             }
-                            .matteButton(isProminent: true, tint: .green, cornerRadius: 8)
+                            .liquidGlass(variant: .primary, size: .sm)
                             .disabled(isBatchInstallingIPAs)
 
                             Button(action: {
@@ -1328,10 +1655,12 @@ struct ContentView: View {
                                 selectedSavedIPAPaths.removeAll()
                                 loadSavedIPAs()
                             }) {
-                                Label("Удалить (\(selectedSavedIPAPaths.count))", systemImage: "trash")
-                                    .foregroundColor(.red)
+                                HStack(spacing: 5) {
+                                    Image(systemName: "trash")
+                                    Text("Удалить (\(selectedSavedIPAPaths.count))")
+                                }
                             }
-                            .matteButton(isProminent: false, cornerRadius: 8)
+                            .liquidGlass(variant: .destructive, size: .sm)
                         }
 
                         Spacer()
@@ -1345,7 +1674,7 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 20)
                     .padding(.vertical, 7)
                 }
             }
@@ -1363,15 +1692,14 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 7) {
+                    LazyVStack(spacing: 8) {
                         ForEach(filteredSavedIPAs) { item in
                             savedIPARow(item: item)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
                 }
-                .clipped()
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -1382,109 +1710,119 @@ struct ContentView: View {
     private func savedIPARow(item: SavedIPA) -> some View {
         let isSelected = selectedSavedIPAPaths.contains(item.path)
 
-        return HStack(spacing: Theme.Metrics.padding12) {
+        return HStack(spacing: 12) {
             Button(action: {
                 if isSelected { selectedSavedIPAPaths.remove(item.path) }
                 else { selectedSavedIPAPaths.insert(item.path) }
             }) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15))
-                    .foregroundColor(isSelected ? Theme.Colors.blue : Color.secondary.opacity(0.5))
+                    .font(.system(size: 16))
+                    .foregroundColor(isSelected ? Theme.Colors.blue : Theme.Colors.textTertiary(for: colorScheme))
             }
             .buttonStyle(.plain)
 
             // App Icon
             appIconView(url: item.artworkUrl, name: item.displayName)
 
-            VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
-                HStack(spacing: Theme.Metrics.padding8) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
                     Text(item.displayName)
-                        .themeCardTitle()
-                        .lineLimit(2)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+                        .lineLimit(1)
 
                     if !item.version.isEmpty {
                         Text(item.version)
-                            .font(.system(size: 9, weight: .medium))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.primary.opacity(0.05))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.06))
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                             .clipShape(Capsule())
                     }
-                }
-
-                HStack(spacing: Theme.Metrics.padding4) {
-                    Text(item.filename)
-                        .themeSubtitle()
-                        .font(.system(size: 11)) // override size if needed, but standard subtitle is 12px
-                        .lineLimit(1)
-
-                    Text("•").foregroundColor(.secondary)
 
                     Text(item.size)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.Colors.purpleTint(for: colorScheme))
+                        .foregroundColor(Theme.Colors.purple)
+                        .clipShape(Capsule())
+                }
 
-                    Text("•").foregroundColor(.secondary)
+                HStack(spacing: 6) {
+                    Text(item.filename)
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                        .lineLimit(1)
+
+                    Text("•").foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
 
                     Text(item.date)
-                        .themeSubtitle()
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            Button(action: {
-                startInstallFlow(ipaPath: item.path, name: item.displayName)
-            }) {
-                Label("Установить", systemImage: "iphone.and.arrow.forward")
-            }
-            .buttonStyle(.borderedProminent)
-            .roundedCapsuleButton()
-            .tint(.green)
-            .controlSize(.small)
+            HStack(spacing: 8) {
+                Button(action: {
+                    startInstallFlow(ipaPath: item.path, name: item.displayName)
+                }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.down.to.line.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Установить")
+                    }
+                }
+                .liquidGlass(variant: .primary, size: .sm)
 
-            Button(action: {
-                try? FileManager.default.removeItem(atPath: item.path)
-                loadSavedIPAs()
-            }) {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundColor(.red.opacity(0.75))
+                Button(action: {
+                    try? FileManager.default.removeItem(atPath: item.path)
+                    loadSavedIPAs()
+                }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.Colors.red)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.primary.opacity(0.04)))
+                }
+                .buttonStyle(.plain)
+                .help("Удалить из библиотеки")
             }
-            .buttonStyle(.plain)
-            .help("Удалить из библиотеки")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Color.blue.opacity(0.08) : Color.primary.opacity(0.035))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isSelected ? Theme.Colors.blueTint(for: colorScheme) : Theme.Colors.cardBackground(for: colorScheme))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isSelected ? Color.blue.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(isSelected ? Theme.Colors.blue.opacity(0.4) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
         )
     }
 
     // MARK: - 5. Settings View (Theme & Library Path)
+    private var settingsHeader: some View {
+        pageHeaderBar(
+            title: "Настройки",
+            subtitle: "Оформление, библиотека и параметры установки"
+        ) {
+            EmptyView()
+        }
+    }
+
     private var settingsView: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                // Header
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Настройки")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                    Text("Управление оформлением, папками и алгоритмами загрузки")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-
+            VStack(alignment: .leading, spacing: 20) {
                 // Section 1: Appearance
-                settingsCard(title: "Оформление интерфейса", icon: "paintbrush.fill", iconColor: .purple) {
+                settingsCard(title: "Оформление интерфейса", icon: "paintbrush.fill", iconColor: Theme.Colors.purple) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Тема приложения")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
 
                         Picker("Тема оформления", selection: $storedScheme) {
                             Text("Системная").tag("system")
@@ -1495,30 +1833,31 @@ struct ContentView: View {
                         .frame(maxWidth: 320)
 
                         Text("Выбор цветовой темы применяется мгновенно ко всем окнам и модальным панелям Open Store.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 12.5))
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                     }
                 }
 
                 // Section 2: Library Storage
-                settingsCard(title: "Расположение библиотеки IPA", icon: "archivebox.fill", iconColor: .green) {
+                settingsCard(title: "Расположение библиотеки IPA", icon: "archivebox.fill", iconColor: Theme.Colors.green) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Папка для сохранения скачанных .ipa файлов")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
 
                         HStack(spacing: 8) {
                             Text(effectiveLibraryPath)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.primary)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor), in: Capsule())
+                                .padding(.vertical, 7)
+                                .background(Theme.Colors.controlBackground(for: colorScheme), in: Capsule())
                                 .overlay(
                                     Capsule()
-                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                        .stroke(Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1)
                                 )
 
                             Button("Выбрать...") {
@@ -1532,18 +1871,14 @@ struct ContentView: View {
                                     loadSavedIPAs()
                                 }
                             }
-                            .buttonStyle(.bordered)
-                            .roundedCapsuleButton()
-                            .controlSize(.small)
+                            .liquidGlass(variant: .glass, size: .sm)
 
                             if !customLibraryPath.isEmpty {
                                 Button("Сбросить") {
                                     customLibraryPath = ""
                                     loadSavedIPAs()
                                 }
-                                .buttonStyle(.bordered)
-                                .roundedCapsuleButton()
-                                .controlSize(.small)
+                                .liquidGlass(variant: .glass, size: .sm)
                             }
                         }
 
@@ -1551,25 +1886,26 @@ struct ContentView: View {
                             Button(action: {
                                 NSWorkspace.shared.open(URL(fileURLWithPath: effectiveLibraryPath))
                             }) {
-                                Label("Показать в Finder", systemImage: "folder")
+                                HStack(spacing: 5) {
+                                    Image(systemName: "folder")
+                                    Text("Показать в Finder")
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .roundedCapsuleButton()
-                            .controlSize(.small)
+                            .liquidGlass(variant: .glass, size: .sm)
 
                             Text("По умолчанию: ~/Downloads/Open Store")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                         }
                     }
                 }
 
                 // Section 3: Engine Mode
-                settingsCard(title: "Движок установки и восстановления", icon: "bolt.fill", iconColor: .blue) {
+                settingsCard(title: "Движок установки и восстановления", icon: "bolt.fill", iconColor: Theme.Colors.blue) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Выберите основной метод работы приложения:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 12.5))
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
 
                         // Option 1: Direct Standalone (Default & Recommended)
                         Button(action: {
@@ -1578,123 +1914,182 @@ struct ContentView: View {
                                 preferDirectMode = true
                             }
                         }) {
-                            HStack(alignment: .top, spacing: Theme.Metrics.padding12) {
-                                Image(systemName: currentEngineMode == .direct ? "largecircle.fill.circle" : "circle")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(currentEngineMode == .direct ? Theme.Colors.blue : .secondary)
-                                    .padding(.top, 2)
+                            HStack(alignment: .top, spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .stroke(currentEngineMode == .direct ? Theme.Colors.blue : Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1.5)
+                                        .frame(width: 18, height: 18)
+                                    if currentEngineMode == .direct {
+                                        Circle()
+                                            .fill(Theme.Colors.blue)
+                                            .frame(width: 8, height: 8)
+                                    }
+                                }
+                                .padding(.top, 2)
 
-                                VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
-                                    HStack(spacing: Theme.Metrics.padding4) {
-                                        Text("⚡ Прямой нативный режим (Open Store Core)")
-                                            .themeCardTitle()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "bolt.fill")
+                                            .foregroundColor(.orange)
+                                            .font(.system(size: 14))
+
+                                        Text("Прямой нативный режим (Open Store Core)")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
 
                                         Text("По умолчанию")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(Theme.Colors.blue))
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(Theme.Colors.blue)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 2.5)
+                                            .background(Theme.Colors.blueTint(for: colorScheme))
+                                            .clipShape(Capsule())
                                     }
 
                                     Text("Молниеносная установка за 2–3 секунды в фоновом режиме через системный сервис iOS. Не требует запуска сторонних утилит, AppleScript и разрешений системы.")
-                                        .themeSubtitle()
+                                        .font(.system(size: 12.5))
+                                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                                        .lineSpacing(2)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
 
                                 Spacer()
                             }
-                            .padding(Theme.Metrics.padding12)
+                            .padding(14)
                             .background(
-                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
-                                    .fill(currentEngineMode == .direct ? Theme.Colors.blue.opacity(0.08) : Color.primary.opacity(0.03))
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(currentEngineMode == .direct ? Theme.Colors.blueTint(for: colorScheme) : Theme.Colors.cardBackground(for: colorScheme))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
-                                    .stroke(currentEngineMode == .direct ? Theme.Colors.blue.opacity(0.4) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(currentEngineMode == .direct ? Theme.Colors.blue.opacity(0.45) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
                             )
                         }
                         .buttonStyle(.plain)
 
                         // Option 2: Apple Configurator (Legacy / Fallback)
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                installEngineMode = InstallEngineMode.configurator.rawValue
-                                preferDirectMode = false
-                            }
-                        }) {
-                            HStack(alignment: .top, spacing: Theme.Metrics.padding12) {
-                                Image(systemName: currentEngineMode == .configurator ? "largecircle.fill.circle" : "circle")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(currentEngineMode == .configurator ? Theme.Colors.amber : .secondary)
+                        if engine.isConfiguratorInstalled {
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    installEngineMode = InstallEngineMode.configurator.rawValue
+                                    preferDirectMode = false
+                                }
+                            }) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .stroke(currentEngineMode == .configurator ? Theme.Colors.amber : Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1.5)
+                                            .frame(width: 18, height: 18)
+                                        if currentEngineMode == .configurator {
+                                            Circle()
+                                                .fill(Theme.Colors.amber)
+                                                .frame(width: 8, height: 8)
+                                        }
+                                    }
                                     .padding(.top, 2)
 
-                                VStack(alignment: .leading, spacing: Theme.Metrics.padding4) {
-                                    HStack(spacing: Theme.Metrics.padding4) {
-                                        Text("⚙️ Apple Configurator (Резервный режим)")
-                                            .themeCardTitle()
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "gearshape.2.fill")
+                                                .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                                                .font(.system(size: 14))
 
-                                        Text("Резерв")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(Theme.Colors.amber))
+                                            Text("Apple Configurator (Резервный режим)")
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+
+                                            Text("Резерв")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(Theme.Colors.amber)
+                                                .padding(.horizontal, 7)
+                                                .padding(.vertical, 2.5)
+                                                .background(Theme.Colors.orangeTint(for: colorScheme))
+                                                .clipShape(Capsule())
+                                        }
+
+                                        Text("Классический режим через графический интерфейс Apple Configurator и базу данных CoreData. Включается только при необходимости.")
+                                            .font(.system(size: 12.5))
+                                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+                                            .lineSpacing(2)
+                                            .fixedSize(horizontal: false, vertical: true)
                                     }
 
-                                    Text("Классический режим через графический интерфейс Apple Configurator и базу данных CoreData. Включается только при необходимости.")
-                                        .themeSubtitle()
+                                    Spacer()
+                                }
+                                .padding(14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(currentEngineMode == .configurator ? Theme.Colors.orangeTint(for: colorScheme) : Theme.Colors.cardBackground(for: colorScheme))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(currentEngineMode == .configurator ? Theme.Colors.amber.opacity(0.45) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            if currentEngineMode == .configurator {
+                                Divider().padding(.vertical, 4)
+
+                                Toggle(isOn: $autoClickConfigurator) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Автоматизация кликов в Apple Configurator")
+                                            .font(.system(size: 12.5, weight: .semibold))
+                                        Text("Автоматически нажимает кнопку «Добавить» и закрывает диалоги замены.")
+                                            .font(.system(size: 11.5))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+                                if autoClickConfigurator && !engine.isAccessibilityGranted {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("⚠️ Требуется разрешение")
+                                            .font(.system(size: 11.5, weight: .bold))
+                                            .foregroundColor(.red)
+                                        Text("Для автоматических кликов нужно разрешить управление компьютером.")
+                                            .font(.system(size: 11.5))
+                                            .foregroundColor(.secondary)
+                                        Button("Разрешить в Системных настройках") {
+                                            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                                            AXIsProcessTrustedWithOptions(options as CFDictionary)
+                                        }
+                                        .liquidGlass(variant: .destructive, size: .sm)
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Theme.Colors.redTint(for: colorScheme))
+                                    .cornerRadius(10)
+                                }
+                            }
+                        } else {
+                            // Missing Configurator Memo
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "info.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.secondary)
+                                    .padding(.top, 2)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Резервный режим недоступен")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.secondary)
+
+                                    Text("Open Store имеет два режима скачивания. Прямой режим включен по умолчанию. Чтобы использовать резервный режим, скачайте Apple Configurator из Mac App Store (если ваша версия macOS его поддерживает).")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-
                                 Spacer()
                             }
-                            .padding(Theme.Metrics.padding12)
+                            .padding(14)
                             .background(
-                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
-                                    .fill(currentEngineMode == .configurator ? Theme.Colors.amber.opacity(0.08) : Color.primary.opacity(0.03))
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color.primary.opacity(0.02))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: Theme.Metrics.radiusCard, style: .continuous)
-                                    .stroke(currentEngineMode == .configurator ? Theme.Colors.amber.opacity(0.4) : Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Theme.Colors.cardBorder(for: colorScheme), style: StrokeStyle(lineWidth: 1, dash: [4]))
                             )
-                        }
-                        .buttonStyle(.plain)
-
-                                                if currentEngineMode == .configurator {
-                            Divider().padding(.vertical, 4)
-
-                            Toggle(isOn: $autoClickConfigurator) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Автоматизация кликов в Apple Configurator")
-                                        .font(.system(size: 12, weight: .semibold))
-                                    Text("Автоматически нажимает кнопку «Добавить» и закрывает диалоги замены.")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            if autoClickConfigurator && !engine.isAccessibilityGranted {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("⚠️ Требуется разрешение")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.red)
-                                    Text("Для автоматических кликов нужно разрешить управление компьютером.")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                    Button("Разрешить в Системных настройках") {
-                                        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-                                        AXIsProcessTrustedWithOptions(options as CFDictionary)
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.red)
-                                    .controlSize(.mini)
-                                }
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.red.opacity(0.1))
-                                .cornerRadius(8)
-                            }
                         }
                     }
                 }
@@ -1703,21 +2098,22 @@ struct ContentView: View {
                 settingsCard(title: "Диагностика и системный журнал", icon: "doc.text.magnifyingglass", iconColor: .orange) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Файл системного журнала Open Store:")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
 
                         HStack(spacing: 8) {
                             Text(LogManager.shared.logFilePath)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.primary)
+                                .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color(NSColor.controlBackgroundColor), in: Capsule())
+                                .padding(.vertical, 7)
+                                .background(Theme.Colors.controlBackground(for: colorScheme), in: Capsule())
                                 .overlay(
                                     Capsule()
-                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                        .stroke(Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1)
                                 )
 
                             Button(action: {
@@ -1728,51 +2124,52 @@ struct ContentView: View {
                                     }
                                 }
                             }) {
-                                HStack(spacing: 4) {
+                                HStack(spacing: 5) {
                                     Image(systemName: copiedLogsToast ? "checkmark" : "doc.on.doc")
                                     Text(copiedLogsToast ? "Скопировано!" : "Копировать логи")
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
-                            .roundedCapsuleButton()
-                            .tint(copiedLogsToast ? .green : .blue)
-                            .controlSize(.small)
+                            .liquidGlass(variant: copiedLogsToast ? .green : .glass, size: .sm)
 
                             Button(action: {
                                 LogManager.shared.clearLog()
                             }) {
-                                Label("Очистить", systemImage: "trash")
+                                HStack(spacing: 5) {
+                                    Image(systemName: "trash")
+                                    Text("Очистить")
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .roundedCapsuleButton()
-                            
+                            .liquidGlass(variant: .glass, size: .sm)
+
                             Button(action: {
                                 let logUrl = URL(fileURLWithPath: LogManager.shared.logFilePath)
                                 NSWorkspace.shared.activateFileViewerSelecting([logUrl])
                             }) {
-                                Label("Показать лог", systemImage: "arrow.up.forward.app")
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.up.forward.app")
+                                    Text("Показать лог")
+                                }
                             }
-                            .buttonStyle(.bordered)
-                            .roundedCapsuleButton()
-                            .controlSize(.small)
+                            .liquidGlass(variant: .glass, size: .sm)
                         }
 
                         Text("Лог-файл автоматически сохраняет диагностические сообщения, ошибки сетевых запросов и события установки.")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 11.5))
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                     }
                 }
 
                 // Section 5: Software Updates
-                settingsCard(title: "Обновление программы", icon: "arrow.triangle.2.circlepath.circle.fill", iconColor: .purple) {
+                settingsCard(title: "Обновление программы", icon: "arrow.triangle.2.circlepath.circle.fill", iconColor: Theme.Colors.purple) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Текущая версия: Open Store v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.2")")
+                                Text("Текущая версия: Open Store v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.3")")
                                     .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                                 Text("Проверка релизов на GitHub в реальном времени.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                             }
                             Spacer()
                             Button(action: {
@@ -1790,9 +2187,7 @@ struct ContentView: View {
                                     Text(engine.isCheckingUpdates ? "Проверка..." : "Проверить обновления")
                                 }
                             }
-                            .buttonStyle(.bordered)
-                            .roundedCapsuleButton()
-                            .controlSize(.small)
+                            .liquidGlass(variant: .glass, size: .sm)
                             .disabled(engine.isCheckingUpdates)
                         }
 
@@ -1801,10 +2196,10 @@ struct ContentView: View {
                         Toggle(isOn: $autoCheckUpdates) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Автоматически проверять обновления при запуске")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.system(size: 12.5, weight: .semibold))
                                 Text("Приложение будет оповещать вас о выходе новых версий с GitHub.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                             }
                         }
 
@@ -1819,15 +2214,15 @@ struct ContentView: View {
 
                                 HStack {
                                     Text(engine.updateStatusStage)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.primary)
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                                     Spacer()
                                     ProgressView()
                                         .controlSize(.small)
                                 }
                             }
                             .padding(12)
-                            .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                            .background(Theme.Colors.blueTint(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
                         } else if let info = engine.latestUpdateInfo {
                             if info.isNewer {
                                 VStack(alignment: .leading, spacing: 10) {
@@ -1842,8 +2237,8 @@ struct ContentView: View {
 
                                     if !info.releaseNotes.isEmpty {
                                         Text(info.releaseNotes)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
+                                            .font(.system(size: 11.5))
+                                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                                             .lineLimit(4)
                                     }
 
@@ -1858,43 +2253,36 @@ struct ContentView: View {
                                                 Text("Обновить и перезапустить")
                                             }
                                         }
-                                        .buttonStyle(.borderedProminent)
-                                        .roundedCapsuleButton()
-                                        .tint(.green)
-                                        .controlSize(.small)
+                                        .liquidGlass(variant: .green, size: .sm)
 
                                         if let dUrl = info.downloadUrl, let url = URL(string: dUrl) {
                                             Button("Открыть на GitHub") {
                                                 NSWorkspace.shared.open(url)
                                             }
-                                            .buttonStyle(.bordered)
-                                            .roundedCapsuleButton()
-                                            .controlSize(.small)
+                                            .liquidGlass(variant: .glass, size: .sm)
                                         }
                                     }
                                 }
                                 .padding(12)
-                                .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                                .background(Theme.Colors.greenTint(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
                             } else {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(spacing: 6) {
                                         Image(systemName: "checkmark.seal.fill")
                                             .foregroundColor(.green)
                                         Text("У вас установлена актуальная версия (\(info.version)).")
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundColor(.secondary)
+                                            .font(.system(size: 11.5, weight: .medium))
+                                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                                         Spacer()
                                         Button("Переустановить с GitHub") {
                                             Task {
                                                 _ = await engine.performSelfUpdate(updateInfo: info)
                                             }
                                         }
-                                        .buttonStyle(.bordered)
-                                        .roundedCapsuleButton()
-                                        .controlSize(.mini)
+                                        .liquidGlass(variant: .glass, size: .sm)
                                     }
                                 }
-                                .padding(8)
+                                .padding(10)
                                 .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
                             }
                         } else if let err = engine.updateCheckError {
@@ -1902,11 +2290,11 @@ struct ContentView: View {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundColor(.orange)
                                 Text("Ошибка проверки: \(err)")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                             }
-                            .padding(8)
-                            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                            .padding(10)
+                            .background(Theme.Colors.orangeTint(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
@@ -1918,60 +2306,101 @@ struct ContentView: View {
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Open Store")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                             Text("Нативный клиент установки и восстановления iOS-приложений с официальной FairPlay DRM лицензией Apple ID.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 11.5))
+                                .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                         }
                     }
                 }
+
+                Text("Open Store 2.0 (build 2604) • macOS 26 Tahoe")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 6)
+                    .padding(.bottom, 12)
             }
             .padding(.horizontal, 24)
-            .padding(.top, (engine.isVpnActive && !vpnNoticeDismissed) ? 16 : 28)
+            .padding(.top, (engine.isVpnActive && !vpnNoticeDismissed) ? 8 : 16)
             .padding(.bottom, 24)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            settingsHeader
         }
     }
 
     private func settingsCard<Content: View>(title: String, icon: String, iconColor: Color, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Metrics.padding12) {
-            HStack(spacing: Theme.Metrics.padding8) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(iconColor)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                // 28x28 Squircle Icon Badge with continuous corner radius 8
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [iconColor.opacity(0.88), iconColor],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 28, height: 28)
+                        .shadow(color: iconColor.opacity(0.3), radius: 3, x: 0, y: 1)
+
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
+                        .frame(width: 28, height: 28)
+
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+
                 Text(title)
-                    .font(Theme.Typography.cardTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(-0.15)
+                    .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
             }
 
             content()
         }
-        .padding(Theme.Metrics.padding16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .themeCardBackground(scheme: colorScheme)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.Colors.cardBackground(for: colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
+        )
     }
 
     // MARK: - Apple ID Sheet
     private var appleIdSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Учётная запись Apple ID")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                Spacer()
-                Button("Закрыть") {
-                    showAppleIdSheet = false
-                    appleIdAuthError = ""
-                    appleIdAuthSuccess = ""
-                    is2FARequired = false
-                    appleIdPasswordInput = ""
-                    appleId2FACodeInput = ""
-                    isPasswordVisible = false
+        liquidGlassSheet {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Учётная запись Apple ID")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                    Spacer()
+                    Button("Закрыть") {
+                        showAppleIdSheet = false
+                        appleIdAuthError = ""
+                        appleIdAuthSuccess = ""
+                        is2FARequired = false
+                        appleIdPasswordInput = ""
+                        appleId2FACodeInput = ""
+                        isPasswordVisible = false
+                    }
+                    .liquidGlass(variant: .glass, size: .sm)
                 }
-                .matteButton(isProminent: false, cornerRadius: 8)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(.ultraThinMaterial)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
 
-            Divider()
+                Rectangle()
+                    .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.18))
+                    .frame(height: 0.5)
 
             VStack(alignment: .leading, spacing: 16) {
                 if engine.isVpnActive {
@@ -2039,7 +2468,7 @@ struct ContentView: View {
                         }) {
                             Label("Синхронизировать покупки", systemImage: "arrow.clockwise")
                         }
-                        .matteButton(isProminent: false, cornerRadius: 8)
+                        .liquidGlass(variant: .glass, size: .sm)
 
                         Spacer()
 
@@ -2049,9 +2478,8 @@ struct ContentView: View {
                             }
                         }) {
                             Label("Сменить аккаунт / Выйти", systemImage: "rectangle.portrait.and.arrow.right")
-                                .foregroundColor(.red)
                         }
-                        .matteButton(isProminent: false, cornerRadius: 8)
+                        .liquidGlass(variant: .destructive, size: .sm)
                     }
                 } else {
                     // Login Form
@@ -2091,11 +2519,11 @@ struct ContentView: View {
                                 .buttonStyle(.plain)
                                 .help(isPasswordVisible ? "Скрыть пароль" : "Показать пароль")
                             }
-                            .padding(.horizontal, 8)
+                            .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                             )
 
@@ -2239,16 +2667,16 @@ struct ContentView: View {
                                 }
                                 .padding(.horizontal, 16)
                             }
-                            .matteButton(isProminent: true, tint: .blue, cornerRadius: 8)
+                            .liquidGlass(variant: .primary, size: .md)
                             .disabled(isLoggingInAppleId || appleIdEmailInput.isEmpty || appleIdPasswordInput.isEmpty || (is2FARequired && appleId2FACodeInput.trimmingCharacters(in: .whitespaces).isEmpty))
                         }
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Theme.Colors.cardBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
                     )
                 }
 
@@ -2256,10 +2684,10 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "lock.shield.fill")
                         .font(.system(size: 14))
-                        .foregroundColor(.blue)
+                        .foregroundColor(Theme.Colors.blue)
                     Text("Авторизация выполняется напрямую через защищенный протокол Apple Store. Ваши учетные данные шифруются по алгоритму AES-256 и сохраняются локально в изолированном файловом хранилище Open Store.")
                         .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                 }
                 .padding(10)
                 .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -2267,11 +2695,7 @@ struct ContentView: View {
             .padding(20)
         }
         .frame(width: 480)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
-        )
+        }
         .onAppear {
             if appleIdEmailInput.isEmpty && !engine.activeAppleIdEmail.isEmpty && !engine.activeAppleIdEmail.contains("DSID") && !engine.isDirectAppleIdAuthenticated {
                 appleIdEmailInput = engine.activeAppleIdEmail
@@ -2343,31 +2767,31 @@ struct ContentView: View {
 
     // MARK: - Restore & Install Progress Sheet
     private var restoreProgressSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(restoringAdamId == 0 ? "Установка на iPhone" : (shouldInstallAfterDownload ? "Загрузка и установка" : "Загрузка IPA"))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                    Text(restoringAppName)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Button("Закрыть") {
-                    if restoringAdamId > 0 {
-                        engine.removeRestoreRequest(adamId: restoringAdamId)
+        liquidGlassSheet {
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(restoringAdamId == 0 ? "Установка на iPhone" : (shouldInstallAfterDownload ? "Загрузка и установка" : "Загрузка IPA"))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                        Text(restoringAppName)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
                     }
-                    isRestoring = false
+                    Spacer()
+                    Button("Закрыть") {
+                        if restoringAdamId > 0 {
+                            engine.removeRestoreRequest(adamId: restoringAdamId)
+                        }
+                        isRestoring = false
+                    }
+                    .liquidGlass(variant: .glass, size: .sm)
                 }
-                .buttonStyle(.bordered)
-                .roundedCapsuleButton()
-                .controlSize(.small)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(.ultraThinMaterial)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
 
-            Divider()
+                Rectangle()
+                    .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.18))
+                    .frame(height: 0.5)
 
             VStack(alignment: .leading, spacing: 12) {
                 // Safety badge
@@ -2410,11 +2834,11 @@ struct ContentView: View {
                     .padding(10)
                 }
                 .frame(height: 140)
-                .background(Color(NSColor.textBackgroundColor))
+                .background(Theme.Colors.cardBackground(for: colorScheme))
                 .cornerRadius(10)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
+                        .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
                 )
 
                 HStack {
@@ -2428,64 +2852,55 @@ struct ContentView: View {
                             isRestoring = false
                             loadSavedIPAs()
                         }
-                        .buttonStyle(.borderedProminent)
-                        .roundedCapsuleButton()
-                        .tint(.green)
+                        .liquidGlass(variant: .green, size: .md)
                     }
                 }
             }
             .padding(20)
         }
         .frame(width: 540)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
-        )
+        }
     }
 
     // MARK: - Device Manager Sheet (iMazing Style)
     private var deviceManagerSheet: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "iphone.and.arrow.forward")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.blue)
-                        Text("Менеджер устройств")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+        liquidGlassSheet {
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "iphone.and.arrow.forward")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.blue)
+                            Text("Менеджер устройств")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                        }
+                        Text("Управление подключенными iPhone/iPad, связью по USB и Wi-Fi, историей и сопряжением")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
                     }
-                    Text("Управление подключенными iPhone/iPad, связью по USB и Wi-Fi, историей и сопряжением")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    Button(action: {
+                        engine.refreshDevices()
+                    }) {
+                        Label("Обновить", systemImage: "arrow.clockwise")
+                    }
+                    .liquidGlass(variant: .glass, size: .sm)
+
+                    Button("Закрыть") {
+                        showDeviceManagerSheet = false
+                    }
+                    .liquidGlass(variant: .primary, size: .sm)
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
 
-                Spacer()
-
-                Button(action: {
-                    engine.refreshDevices()
-                }) {
-                    Label("Обновить", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .roundedCapsuleButton()
-                .controlSize(.small)
-
-                Button("Закрыть") {
-                    showDeviceManagerSheet = false
-                    showDeviceManagerSheet = false
-                }
-                .buttonStyle(.borderedProminent)
-                .roundedCapsuleButton()
-                .controlSize(.small)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(.ultraThinMaterial)
-
-            Divider()
+                Rectangle()
+                    .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.18))
+                    .frame(height: 0.5)
 
             // Main Split Body: Left List, Right Inspector
             HStack(spacing: 0) {
@@ -2686,23 +3101,18 @@ struct ContentView: View {
                                         }) {
                                             Label("Сделать активным", systemImage: "checkmark.circle.fill")
                                         }
-                                        .buttonStyle(.borderedProminent)
-                                        .roundedCapsuleButton()
-                                        .controlSize(.regular)
+                                        .liquidGlass(variant: .primary, size: .sm)
                                     }
 
                                     if dev.isOnline {
                                         Button(action: {
-                                            showDeviceManagerSheet = false
                                             showDeviceManagerSheet = false
                                             storedSidebarTab = SidebarItem.device.rawValue
                                             engine.scanInstalledAppsFromDevice(catalog: catalogApps)
                                         }) {
                                             Label("Сканировать приложения", systemImage: "arrow.clockwise")
                                         }
-                                        .buttonStyle(.bordered)
-                                        .roundedCapsuleButton()
-                                        .controlSize(.regular)
+                                        .liquidGlass(variant: .glass, size: .sm)
                                     }
 
                                     Spacer()
@@ -2712,19 +3122,16 @@ struct ContentView: View {
                                         showForgetConfirmDialog = true
                                     }) {
                                         Label("Удалить связь", systemImage: "trash")
-                                            .foregroundColor(.red)
                                     }
-                                    .buttonStyle(.bordered)
-                                    .roundedCapsuleButton()
-                                    .controlSize(.regular)
+                                    .liquidGlass(variant: .destructive, size: .sm)
                                     .help("Удалить сопряжение и историю устройства")
                                 }
                             }
                             .padding(14)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(Theme.Colors.cardBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                    .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
                             )
                         }
                         .padding(16)
@@ -2734,12 +3141,13 @@ struct ContentView: View {
                         Spacer()
                         Image(systemName: "cable.connector")
                             .font(.system(size: 40))
-                            .foregroundColor(.secondary.opacity(0.6))
+                            .foregroundColor(Theme.Colors.textTertiary(for: colorScheme))
                         Text("Устройства не найдены")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
                         Text("Подключите iPhone через USB-кабель или по Wi-Fi для управления и установки приложений.")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 320)
                         Spacer()
@@ -2749,11 +3157,7 @@ struct ContentView: View {
             }
         }
         .frame(width: 820, height: 570)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
-        )
+        }
     }
 
     private func deviceListCard(dev: DeviceInfo, isOnline: Bool) -> some View {
@@ -2861,67 +3265,63 @@ struct ContentView: View {
 
     // MARK: - Manual Adam ID Sheet
     private var manualAdamIdSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Указать Adam ID")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                Spacer()
-                Button("Закрыть") { showManualAdamIdDialog = false }
-                    .buttonStyle(.bordered)
-                    .roundedCapsuleButton()
-                    .controlSize(.small)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(.ultraThinMaterial)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Приложение: **\(manualAppName)**")
-                    .font(.system(size: 13))
-                Text("Bundle ID: `\(manualBundleId)`")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-
-                TextField("Числовой Adam ID (например: 570510529)", text: $manualEnteredId)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                    )
-                    .onSubmit {
-                        if let aid = Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) {
-                            engine.saveUserMapping(bundleId: manualBundleId, adamId: aid)
-                            showManualAdamIdDialog = false
-                        }
-                    }
-
+        liquidGlassSheet {
+            VStack(spacing: 0) {
                 HStack {
+                    Text("Указать Adam ID")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                     Spacer()
-                    Button("Сохранить") {
-                        if let aid = Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) {
-                            engine.saveUserMapping(bundleId: manualBundleId, adamId: aid)
-                            showManualAdamIdDialog = false
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .roundedCapsuleButton()
-                    .disabled(Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) == nil)
+                    Button("Закрыть") { showManualAdamIdDialog = false }
+                        .liquidGlass(variant: .glass, size: .sm)
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+
+                Rectangle()
+                    .fill(Theme.Colors.cardBorder(for: colorScheme).opacity(0.18))
+                    .frame(height: 0.5)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Приложение: **\(manualAppName)**")
+                        .font(.system(size: 13))
+                        .foregroundColor(Theme.Colors.textPrimary(for: colorScheme))
+                    Text("Bundle ID: `\(manualBundleId)`")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.Colors.textSecondary(for: colorScheme))
+
+                    TextField("Числовой Adam ID (например: 570510529)", text: $manualEnteredId)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Theme.Colors.controlBackground(for: colorScheme), in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Theme.Colors.controlBorder(for: colorScheme), lineWidth: 1)
+                        )
+                        .onSubmit {
+                            if let aid = Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) {
+                                engine.saveUserMapping(bundleId: manualBundleId, adamId: aid)
+                                showManualAdamIdDialog = false
+                            }
+                        }
+
+                    HStack {
+                        Spacer()
+                        Button("Сохранить") {
+                            if let aid = Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) {
+                                engine.saveUserMapping(bundleId: manualBundleId, adamId: aid)
+                                showManualAdamIdDialog = false
+                            }
+                        }
+                        .liquidGlass(variant: .primary, size: .sm)
+                        .disabled(Int64(manualEnteredId.trimmingCharacters(in: .whitespaces)) == nil)
+                    }
+                }
+                .padding(20)
             }
-            .padding(20)
+            .frame(width: 420)
         }
-        .frame(width: 420)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.Colors.cardBorder(for: colorScheme), lineWidth: 1)
-        )
     }
 
     // MARK: - Business Logic
@@ -3101,39 +3501,49 @@ struct ContentView: View {
                         self.showAppleIdSheet = true
                     }
                     return
-                                } else {
+                } else {
                     engine.appendLog("⚠️ Прямая загрузка не удалась: \(msg)")
-                    engine.appendLog("🔄 Автоматический переход в резервный режим Apple Configurator...")
-                    DispatchQueue.main.async {
-                        self.engine.operationStage = "Переход в Apple Configurator..."
+                    if engine.isConfiguratorInstalled {
+                        engine.appendLog("🔄 Автоматический переход в резервный режим Apple Configurator...")
+                        DispatchQueue.main.async {
+                            self.engine.operationStage = "Переход в Apple Configurator..."
+                        }
+                    } else {
+                        engine.appendLog("❌ Резервный режим недоступен. Скачивание отменено.")
+                        DispatchQueue.main.async {
+                            self.restoreError = "Прямая загрузка не удалась, а резервный режим недоступен. Установите Apple Configurator из Mac App Store."
+                        }
+                        return
                     }
                     // Fallthrough to Configurator mode
                 }
             }
 
             // Apple Configurator Mode
-            do {
-                if engine.isConfiguratorRunning() { engine.quitConfigurator() }
-                try engine.injectRestoreRequest(adamId: adamId, extVersion: extVersion)
-                engine.openConfigurator()
-                if autoClickConfigurator {
-                    try? await Task.sleep(nanoseconds: 1_800_000_000)
-                    engine.executeConfiguratorAutomation(adamId: adamId, appName: name)
-                }
-                let result = try await engine.watchAndCapture(adamId: adamId, knownName: name)
-                engine.appendLog("🎉 IPA сохранён: \(result.path)")
-                restoreSuccessIPA = result.path
-                if shouldInstallAfterDownload, let dev = engine.activeDevice ?? engine.connectedDevices.first {
-                    let (ok, msg) = await engine.installApp(ipaPath: result.path, udid: dev.udid)
-                    engine.appendLog(ok ? "✅ Установлено на \(dev.name)!" : "⚠️ \(msg)")
-                }
-                engine.removeRestoreRequest(adamId: adamId)
-                loadSavedIPAs()
-            } catch {
-                engine.appendLog("Ошибка Configurator: \(error.localizedDescription)")
-                engine.removeRestoreRequest(adamId: adamId)
-                DispatchQueue.main.async {
-                    self.restoreError = error.localizedDescription
+            if engine.isConfiguratorInstalled {
+                do {
+                    if engine.isConfiguratorRunning() { engine.quitConfigurator() }
+                    try engine.injectRestoreRequest(adamId: adamId, extVersion: extVersion)
+                    engine.openConfigurator()
+                    if autoClickConfigurator {
+                        try? await Task.sleep(nanoseconds: 1_800_000_000)
+                        engine.executeConfiguratorAutomation(adamId: adamId, appName: name)
+                    }
+                    let result = try await engine.watchAndCapture(adamId: adamId, knownName: name)
+                    engine.appendLog("🎉 IPA сохранён: \(result.path)")
+                    restoreSuccessIPA = result.path
+                    if shouldInstallAfterDownload, let dev = engine.activeDevice ?? engine.connectedDevices.first {
+                        let (ok, msg) = await engine.installApp(ipaPath: result.path, udid: dev.udid)
+                        engine.appendLog(ok ? "✅ Установлено на \(dev.name)!" : "⚠️ \(msg)")
+                    }
+                    engine.removeRestoreRequest(adamId: adamId)
+                    loadSavedIPAs()
+                } catch {
+                    engine.appendLog("Ошибка Configurator: \(error.localizedDescription)")
+                    engine.removeRestoreRequest(adamId: adamId)
+                    DispatchQueue.main.async {
+                        self.restoreError = error.localizedDescription
+                    }
                 }
             }
         }

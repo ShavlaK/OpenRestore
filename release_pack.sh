@@ -4,7 +4,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-VERSION="1.6.2"
+VERSION="1.6.3"
 DIST_DIR="$DIR/dist"
 RELEASE_DIR="$DIR/OpenStore_Release"
 
@@ -13,7 +13,7 @@ echo "  Open Store v${VERSION} — Сборка Раздельных Релиз�
 echo "=========================================="
 
 # 1. Rebuild separated apps
-./build_app.sh
+KEEP_BUILD_TMP=1 ./build_app.sh
 
 mkdir -p "$DIST_DIR"
 rm -rf "$DIST_DIR"/*
@@ -69,8 +69,9 @@ create_zip "x86_64" "OpenStore-v${VERSION}-Mac-Intel.zip"
 # 5. Create Universal / Legacy Fallback ZIPs (for 100% backwards compatibility)
 echo "📦 Создание Universal ZIP-архивов для обратной совместимости..."
 create_zip "universal" "OpenStore-v${VERSION}-macOS.zip"
+cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenRestore-v${VERSION}-macOS.zip"
 cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenStore.app.zip"
-cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip"
+cp "$DIST_DIR/OpenStore-v${VERSION}-macOS.zip" "$DIST_DIR/OpenRestore.app.zip"
 
 # 6. Create Windows ZIP (with windowsgui flag & masked tools)
 echo "📦 Сборка и создание Windows ZIP-архива..."
@@ -79,9 +80,8 @@ echo "📦 Сборка и создание Windows ZIP-архива..."
     cp bin/ios.exe bin/os-agent.exe 2>/dev/null || true
     cp bin/ipatool.exe bin/os-store-helper.exe 2>/dev/null || true
     GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui -s -w" -o OpenStore.exe .
-    cp OpenStore.exe OpenStore.exe
-    zip -r -q "../dist/OpenStore-v${VERSION}-Windows-x64.zip" OpenStore.exe OpenStore.exe bin/ web/
-    cp "../dist/OpenStore-v${VERSION}-Windows-x64.zip" "../dist/OpenStore-v${VERSION}-Windows-x64.zip"
+    zip -r -q "../dist/OpenStore-v${VERSION}-Windows-x64.zip" OpenStore.exe bin/ web/
+    cp "../dist/OpenStore-v${VERSION}-Windows-x64.zip" "../dist/OpenRestore-v${VERSION}-Windows-x64.zip"
 )
 
 # 7. Setup Local Release Directory

@@ -620,12 +620,12 @@ type UpdateInfo struct {
 	CurrentVer   string `json:"currentVersion"`
 }
 
-const CurrentAppVersion = "1.6.2"
+const CurrentAppVersion = "1.6.3"
 
 func (e *AppEngine) CheckForUpdates() (*UpdateInfo, error) {
 	repos := []string{
 		"https://api.github.com/repos/ShavlaK/OpenStore/releases/latest",
-		"https://api.github.com/repos/ShavlaK/OpenStore/releases/latest",
+		"https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest",
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}

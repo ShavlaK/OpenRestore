@@ -416,6 +416,15 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
     }()
 
     public static let cfgutilPath = "/Applications/Apple Configurator.app/Contents/MacOS/cfgutil"
+    
+    public var isConfiguratorInstalled: Bool {
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: "/Applications/Apple Configurator.app", isDirectory: &isDir) {
+            return isDir.boolValue
+        }
+        return false
+    }
+
     public static let workDir = Bundle.main.resourcePath ?? "/tmp"
     public static let libraryDir: String = {
         let home = NSHomeDirectory()
@@ -638,7 +647,7 @@ public final class ConfiguratorEngine: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .utility).async {
             let fileManager = FileManager.default
             let currentPath = Bundle.main.bundlePath
-            let currentVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.2"
+            let currentVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.3"
 
             let searchDirs: [String] = [
                 "/Applications",
@@ -3543,7 +3552,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
     @MainActor
     public func checkForUpdates(currentVersion: String? = nil) async -> (AppUpdateInfo?, String?) {
-        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.2")
+        let actualVersion = currentVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.6.3")
         self.isCheckingUpdates = true
         self.updateCheckError = nil
 
@@ -3553,7 +3562,7 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
 
         let repoUrls = [
             "https://api.github.com/repos/ShavlaK/OpenStore/releases/latest",
-            "https://api.github.com/repos/ShavlaK/OpenStore/releases/latest"
+            "https://api.github.com/repos/ShavlaK/OpenRestore/releases/latest"
         ]
 
         var lastErr = "Ошибка сети при проверке обновлений"
@@ -3656,9 +3665,9 @@ public static func runProcessWithSafeOutput(executable: String, arguments: [Stri
         }
 
         let fallbackInfo = AppUpdateInfo(
-            id: "v1.6.2",
-            version: "v1.6.2",
-            title: "Open Store v1.6.2",
+            id: "v1.6.3",
+            version: "v1.6.3",
+            title: "Open Store v1.6.3",
             releaseNotes: "У вас установлена самая свежая версия программы.",
             downloadUrl: nil,
             publishedAt: "",

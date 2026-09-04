@@ -4,9 +4,9 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-echo "Компиляция нативного приложения Open Store.app (v1.6.2)..."
+echo "Компиляция нативного приложения Open Store.app (v1.6.3)..."
 
-VERSION="1.6.2"
+VERSION="1.6.3"
 
 # Create build functions
 build_app_for_arch() {
@@ -57,7 +57,7 @@ PLIST
     # Compile Swift with IOKit framework and symbol stripping (-Xlinker -x)
     swiftc -O -parse-as-library -target "$target_arch" \
       native_app/ConfiguratorEngine.swift native_app/ContentView.swift native_app/App.swift native_app/Theme.swift \
-      -framework IOKit -framework Foundation -framework AppKit -framework SwiftUI \
+      -framework IOKit -framework Foundation -framework AppKit -framework SwiftUI -framework QuartzCore \
       -lsqlite3 -Xlinker -x -o "$app_dir/Contents/MacOS/OpenStore"
 
     cp catalog.json "$app_dir/Contents/Resources/catalog.json"
@@ -153,6 +153,8 @@ rm -rf "Open Store.app" "OpenRestore.app"
 echo "📦 Установка актуальной версии в /Applications/Open Store.app..."
 rm -rf "/Applications/Open Store.app"
 cp -R "build_tmp/OpenStore_universal.app" "/Applications/Open Store.app"
-rm -rf build_tmp
+if [ "${KEEP_BUILD_TMP:-0}" != "1" ]; then
+    rm -rf build_tmp
+fi
 
 echo "Готово! Приложение Open Store.app (v${VERSION}) собрано и установлено в /Applications/."
